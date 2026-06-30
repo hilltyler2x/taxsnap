@@ -3,7 +3,6 @@ import AzureADProvider from "next-auth/providers/azure-ad"
 import { PrismaAdapter } from "@auth/prisma-adapter"
 import { prisma } from "@/lib/prisma"
 import type { NextAuthOptions } from "next-auth"
-process.env.NEXTAUTH_URL = "https://taxsnap-jet.vercel.app"
 
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(prisma) as any,
