@@ -128,7 +128,8 @@ export default function Dashboard() {
       clearInterval(iv)
 
       if (!res.ok) {
-        toast.error("Could not read receipt — try a clearer photo")
+        const err = await res.json().catch(() => ({}))
+        toast.error(err.error ?? "Could not read receipt — try a clearer photo")
         setScanState("idle")
         return
       }

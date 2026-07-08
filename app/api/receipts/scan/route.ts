@@ -16,24 +16,33 @@ export async function POST(req: NextRequest) {
   const base64 = Buffer.from(bytes).toString("base64")
   const mediaType = (file.type || "image/jpeg") as "image/jpeg" | "image/png" | "image/webp" | "image/gif"
 
-  const message = await client.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 512,
-    messages: [{
-      role: "user",
-      content: [
-        { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
-        { type: "text", text: `Extract receipt info. Return ONLY valid JSON, no markdown:\n{"name":"merchant","amount":0.00,"date":"YYYY-MM-DD","place":"city or online","category":"Travel|Meals|Office|Software|Home|Medical|Other","purpose":"business reason","notes":""}\nIf not a receipt: {"error":"not a receipt"}` }
-      ]
-    }]
-  })
-
-  const text = message.content[0].type === "text" ? message.content[0].text : ""
+  let text = ""
   try {
-    const parsed = JSON.parse(text.replace(/```json\n?|\n?```/g, "").trim())
+    const message = await client.messages.create({
+      model: "claude-sonnet-5",
+      max_tokens: 512,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
+          { type: "text", text: `Extract receipt info. Return ONLY valid JSON, no markdown:\n{"name":"merchant","amount":0.00,"date":"YYYY-MM-DD","place":"city or online","category":"Travel|Meals|Office|Software|Home|Medical|Other","purpose":"business reason","notes":""}\nIf not a receipt: {"error":"not a receipt"}` }
+        ]
+      }]
+    })
+    text = message.content[0].type === "text" ? message.content[0].text : ""
+  } catch (err) {
+    console.error("Anthropic receipt scan request failed:", err)
+    return NextResponse.json({ error: "Receipt scanning is temporarily unavailable. Try again in a moment." }, { status: 502 })
+  }
+
+  const cleaned = text.replace(/```json\n?|\n?```/g, "").trim()
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/)
+  try {
+    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned)
     if (parsed.error) return NextResponse.json({ error: parsed.error }, { status: 400 })
     return NextResponse.json({ extracted: parsed })
-  } catch {
+  } catch (err) {
+    console.error("Could not parse receipt scan response:", text)
     return NextResponse.json({ error: "Could not parse receipt" }, { status: 400 })
   }
 }
