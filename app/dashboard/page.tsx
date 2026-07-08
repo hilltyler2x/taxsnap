@@ -1,5 +1,5 @@
 "use client"
-import { useUser } from "@clerk/nextjs"
+import { useUser, useClerk } from "@clerk/nextjs"
 import { useEffect, useState, useRef } from "react"
 import toast from "react-hot-toast"
 import { calcDeductible, IRS_MILEAGE_RATE, CATEGORIES } from "@/lib/irs"
@@ -47,6 +47,7 @@ type ScanState = "idle" | "processing" | "confirm"
 
 export default function Dashboard() {
   const { isLoaded, isSignedIn, user: clerkUser } = useUser()
+  const { signOut } = useClerk()
   const [me, setMe] = useState<{ plan: string; isOwner: boolean } | null>(null)
   const [tab, setTab] = useState<Tab>("home")
   const [receipts, setReceipts] = useState<any[]>([])
@@ -340,7 +341,7 @@ export default function Dashboard() {
                   ✦ Demo scan (no real photo needed)
                 </button>
 
-                <input ref={galleryRef} type="file" accept="image/*,application/pdf" className="hidden"
+                <input ref={galleryRef} type="file" accept="image/*" className="hidden"
                   onChange={e => e.target.files?.[0] && handleRealUpload(e.target.files[0])} />
                 <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden"
                   onChange={e => e.target.files?.[0] && handleRealUpload(e.target.files[0])} />
@@ -414,6 +415,7 @@ export default function Dashboard() {
         {tab === "account" && (
           <AccountTab
             session={{ user: displayUser }}
+            onSignOut={() => signOut({ redirectUrl: "/landing" })}
             plan={plan}
             isPro={isPro}
             billingCycle={billingCycle}
@@ -654,7 +656,7 @@ function TaxesTab({ receipts, trips, isPro, onUpgrade }: any) {
   )
 }
 
-function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, emails, emailConnected, importedEmails, onFetchEmails, onImportEmail, onCheckout, ownerPass, onOwnerPassChange, ownerErr, onOwnerUnlock }: any) {
+function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, emails, emailConnected, importedEmails, onFetchEmails, onImportEmail, onCheckout, ownerPass, onOwnerPassChange, ownerErr, onOwnerUnlock, onSignOut }: any) {
   const PRICES: Record<string, any> = {
     proMonthly: process.env.NEXT_PUBLIC_STRIPE_PRO_MONTHLY ?? "",
     proAnnual: process.env.NEXT_PUBLIC_STRIPE_PRO_ANNUAL ?? "",
@@ -676,6 +678,9 @@ function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, email
         <div className="px-4 py-3 text-xs text-gray-500">
           {plan === "OWNER" ? "Owner access — all features, no charge" : plan === "LIFETIME" ? "Lifetime — all features forever, no future charges" : plan === "FREE" ? "Free — 10 receipts/month" : plan + " — unlimited receipts"}
         </div>
+        <button onClick={onSignOut} className="w-full text-left px-4 py-3 text-xs text-red-600 border-t border-gray-100 hover:bg-red-50 transition-colors">
+          Sign out
+        </button>
       </div>
 
       {plan === "OWNER" && (

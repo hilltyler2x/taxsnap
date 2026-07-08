@@ -12,9 +12,11 @@ export async function POST(req: NextRequest) {
   const file = formData.get("file") as File | null
   if (!file) return NextResponse.json({ error: "No file provided" }, { status: 400 })
 
+  const SUPPORTED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const
+  const mediaType = SUPPORTED_TYPES.includes(file.type as any) ? (file.type as (typeof SUPPORTED_TYPES)[number]) : "image/jpeg"
+
   const bytes = await file.arrayBuffer()
   const base64 = Buffer.from(bytes).toString("base64")
-  const mediaType = (file.type || "image/jpeg") as "image/jpeg" | "image/png" | "image/webp" | "image/gif"
 
   let text = ""
   try {
@@ -25,7 +27,7 @@ export async function POST(req: NextRequest) {
         role: "user",
         content: [
           { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
-          { type: "text", text: `Extract receipt info. Return ONLY valid JSON, no markdown:\n{"name":"merchant","amount":0.00,"date":"YYYY-MM-DD","place":"city or online","category":"Travel|Meals|Office|Software|Home|Medical|Other","purpose":"business reason","notes":""}\nIf not a receipt: {"error":"not a receipt"}` }
+          { type: "text", text: `You're extracting data from a photo of a business expense document — this could be a receipt, invoice, bill, order confirmation, statement, or similar. Read every visible field carefully, even if the photo is angled, blurry, dim, low-resolution, or partially cropped — always give your best-effort extraction rather than giving up.\n\nReturn ONLY valid JSON, no markdown, no commentary:\n{"name":"merchant or vendor name","amount":0.00,"date":"YYYY-MM-DD","place":"city or online","category":"Travel|Meals|Office|Software|Home|Medical|Other","purpose":"likely business reason","notes":""}\n\nOnly return {"error":"not a business document"} if the photo is clearly unrelated to any purchase, expense, invoice, or receipt (e.g. a selfie, landscape, random object, or blank page). Do not reject a real document just because it's blurry, low quality, or an unusual format.` }
         ]
       }]
     })
