@@ -67,8 +67,6 @@ export default function Dashboard() {
   const [aiStatusMsg, setAiStatusMsg] = useState("Reading your receipt...")
   const galleryRef = useRef<HTMLInputElement>(null)
   const cameraRef = useRef<HTMLInputElement>(null)
-  const [ownerPass, setOwnerPass] = useState("")
-  const [ownerErr, setOwnerErr] = useState(false)
 
   const plan = me?.plan ?? "FREE"
   const isPro = plan !== "FREE"
@@ -210,16 +208,6 @@ export default function Dashboard() {
       toast.success("Imported!")
       fetchReceipts()
     }
-  }
-
-  const ownerUnlock = async () => {
-    const res = await fetch("/api/owner", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ passcode: ownerPass }),
-    })
-    if (res.ok) { toast.success("Owner access granted!"); window.location.reload() }
-    else { setOwnerErr(true); setOwnerPass(""); setTimeout(() => setOwnerErr(false), 2500) }
   }
 
   const startCheckout = async (priceId: string) => {
@@ -426,10 +414,6 @@ export default function Dashboard() {
             onFetchEmails={fetchEmails}
             onImportEmail={importEmail}
             onCheckout={startCheckout}
-            ownerPass={ownerPass}
-            onOwnerPassChange={setOwnerPass}
-            ownerErr={ownerErr}
-            onOwnerUnlock={ownerUnlock}
           />
         )}
       </div>
@@ -656,7 +640,7 @@ function TaxesTab({ receipts, trips, isPro, onUpgrade }: any) {
   )
 }
 
-function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, emails, emailConnected, importedEmails, onFetchEmails, onImportEmail, onCheckout, ownerPass, onOwnerPassChange, ownerErr, onOwnerUnlock, onSignOut }: any) {
+function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, emails, emailConnected, importedEmails, onFetchEmails, onImportEmail, onCheckout, onSignOut }: any) {
   const PRICES: Record<string, any> = {
     proMonthly: process.env.NEXT_PUBLIC_STRIPE_PRO_MONTHLY ?? "",
     proAnnual: process.env.NEXT_PUBLIC_STRIPE_PRO_ANNUAL ?? "",
@@ -758,17 +742,6 @@ function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, email
         )}
       </div>
 
-      {/* Owner access */}
-      {plan !== "OWNER" && (
-        <div className="bg-white border border-gray-100 rounded-2xl p-4">
-          <p className="text-xs font-medium text-gray-500 mb-3">🔒 Owner access</p>
-          <div className="flex gap-2">
-            <input type="password" value={ownerPass} onChange={e => onOwnerPassChange(e.target.value)} placeholder="Enter owner passcode" className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2" onKeyDown={e => e.key === "Enter" && onOwnerUnlock()} />
-            <button onClick={onOwnerUnlock} className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-medium border-none cursor-pointer">Enter</button>
-          </div>
-          {ownerErr && <p className="text-xs text-red-500 mt-2">Incorrect passcode</p>}
-        </div>
-      )}
     </div>
   )
 }
