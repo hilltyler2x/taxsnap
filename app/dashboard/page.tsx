@@ -79,6 +79,20 @@ export default function Dashboard() {
     }
   }, [isLoaded, isSignedIn])
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const connected = params.get("email_connected")
+    const error = params.get("email_error")
+    const tabParam = params.get("tab")
+    if (tabParam === "account") setTab("account")
+    if (connected) {
+      toast.success(`${connected === "google" ? "Gmail" : "Outlook"} connected!`)
+      fetchEmails()
+    }
+    if (error) toast.error("Could not connect email account. Try again.")
+    if (connected || error || tabParam) window.history.replaceState({}, "", "/dashboard")
+  }, [])
+
   const fetchMe = async () => {
     const res = await fetch("/api/me")
     if (res.ok) setMe(await res.json())
@@ -714,7 +728,7 @@ function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, email
                 <div className="flex-1"><p className="text-sm font-medium">{p.label}</p><p className="text-xs text-gray-400">{connected ? session?.user?.email : "Not connected"}</p></div>
                 {connected
                   ? <span className="text-xs bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full font-medium">Connected</span>
-                  : <button onClick={() => { if (!isPro) { alert("Email import requires Pro. Upgrade in Account."); return } onFetchEmails() }} className="text-xs border border-gray-200 px-3 py-1.5 rounded-lg cursor-pointer">Connect</button>
+                  : <a href={isPro ? `/api/email/connect/${p.provider}` : undefined} onClick={e => { if (!isPro) { e.preventDefault(); alert("Email import requires Pro. Upgrade in Account.") } }} className="text-xs border border-gray-200 px-3 py-1.5 rounded-lg cursor-pointer no-underline text-gray-700">Connect</a>
                 }
               </div>
             )
