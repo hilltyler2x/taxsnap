@@ -6,7 +6,7 @@ import { calcDeductible, IRS_MILEAGE_RATE, CATEGORIES } from "@/lib/irs"
 
 const CC: Record<string, string> = {
   Travel: "#1D9E75", Meals: "#BA7517", Office: "#185FA5",
-  Software: "#534AB7", Home: "#3B6D11", Medical: "#A32D2D", Other: "#888780",
+  Software: "#534AB7", Home: "#3B6D11", Medical: "#A32D2D", Business: "#0F766E", Other: "#888780",
 }
 
 const ADDRESS_SUGGESTIONS = [
@@ -58,6 +58,8 @@ export default function Dashboard() {
   const [scanNote, setScanNote] = useState("")
   const [scanData, setScanData] = useState<any>(null)
   const [scanForm, setScanForm] = useState<any>(null)
+  const [editingReceipt, setEditingReceipt] = useState<any>(null)
+  const [editForm, setEditForm] = useState<any>(null)
   const [destSuggestions, setDestSuggestions] = useState<any[]>([])
   const [destTimer, setDestTimer] = useState<any>(null)
   const [importedEmails, setImportedEmails] = useState<Set<string>>(new Set())
@@ -93,6 +95,10 @@ export default function Dashboard() {
     if (connected || error || tabParam) window.history.replaceState({}, "", "/dashboard")
   }, [])
 
+  useEffect(() => {
+    if (tab === "account" && isPro) fetchEmails()
+  }, [tab, isPro])
+
   const fetchMe = async () => {
     const res = await fetch("/api/me")
     if (res.ok) setMe(await res.json())
@@ -106,6 +112,17 @@ export default function Dashboard() {
   const fetchTrips = async () => {
     const res = await fetch("/api/trips")
     if (res.ok) setTrips((await res.json()).trips)
+  }
+
+  const disconnectEmail = async (provider: string) => {
+    const res = await fetch(`/api/email/disconnect/${provider}`, { method: "DELETE" })
+    if (res.ok) {
+      toast.success("Disconnected")
+      setEmailConnected(prev => prev.filter(p => p !== provider))
+      setEmails(prev => prev.filter((e: any) => provider === "google" ? !e.gmailId : !e.outlookId))
+    } else {
+      toast.error("Failed to disconnect")
+    }
   }
 
   const fetchEmails = async () => {
@@ -194,6 +211,42 @@ export default function Dashboard() {
       const err = await res.json()
       toast.error(err.error ?? "Failed to save")
       if (res.status === 403) setTab("account")
+    }
+  }
+
+  const openEditReceipt = (r: any) => {
+    setEditingReceipt(r)
+    setEditForm({ ...r, date: new Date(r.date).toISOString().split("T")[0] })
+  }
+
+  const saveReceiptEdit = async () => {
+    if (!editForm || !editingReceipt) return
+    const res = await fetch(`/api/receipts/${editingReceipt.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(editForm),
+    })
+    if (res.ok) {
+      toast.success("Receipt updated!")
+      setEditingReceipt(null)
+      setEditForm(null)
+      fetchReceipts()
+    } else {
+      const err = await res.json()
+      toast.error(err.error ?? "Failed to update")
+    }
+  }
+
+  const deleteReceiptEdit = async () => {
+    if (!editingReceipt) return
+    const res = await fetch(`/api/receipts/${editingReceipt.id}`, { method: "DELETE" })
+    if (res.ok) {
+      toast.success("Receipt deleted")
+      setEditingReceipt(null)
+      setEditForm(null)
+      fetchReceipts()
+    } else {
+      toast.error("Failed to delete")
     }
   }
 
@@ -387,7 +440,7 @@ export default function Dashboard() {
               <button onClick={() => setTab("receipts")} className="text-xs text-gray-400">View all</button>
             </div>
             <div className="space-y-2">
-              {receipts.slice(0, 3).map(r => <ReceiptCard key={r.id} r={r} />)}
+              {receipts.slice(0, 3).map(r => <ReceiptCard key={r.id} r={r} onClick={() => openEditReceipt(r)} />)}
               {!receipts.length && <p className="text-xs text-gray-400 text-center py-6">No receipts yet — scan one above</p>}
             </div>
           </div>
@@ -396,7 +449,7 @@ export default function Dashboard() {
         {/* RECEIPTS */}
         {tab === "receipts" && (
           <div className="space-y-2">
-            {receipts.map(r => <ReceiptCard key={r.id} r={r} />)}
+            {receipts.map(r => <ReceiptCard key={r.id} r={r} onClick={() => openEditReceipt(r)} />)}
             {!receipts.length && <p className="text-xs text-gray-400 text-center py-10">No receipts yet</p>}
           </div>
         )}
@@ -427,10 +480,28 @@ export default function Dashboard() {
             importedEmails={importedEmails}
             onFetchEmails={fetchEmails}
             onImportEmail={importEmail}
+            onDisconnectEmail={disconnectEmail}
             onCheckout={startCheckout}
           />
         )}
       </div>
+
+      {/* Edit receipt modal */}
+      {editingReceipt && editForm && (
+        <div className="fixed inset-0 bg-black/40 z-20 flex items-end sm:items-center justify-center p-3" onClick={() => { setEditingReceipt(null); setEditForm(null) }}>
+          <div className="w-full max-w-lg max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <ScanConfirmForm
+              form={editForm}
+              note="Edit receipt details"
+              onChange={setEditForm}
+              onSave={saveReceiptEdit}
+              onDiscard={() => { setEditingReceipt(null); setEditForm(null) }}
+              onDelete={deleteReceiptEdit}
+              saveLabel="✓ Save changes"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Bottom nav */}
       <div className="fixed bottom-0 left-0 right-0 max-w-lg mx-auto bg-white border-t border-gray-100 flex z-10">
@@ -447,12 +518,12 @@ export default function Dashboard() {
 
 // ─── Sub-components ───────────────────────────────────────────
 
-function ReceiptCard({ r }: { r: any }) {
+function ReceiptCard({ r, onClick }: { r: any; onClick?: () => void }) {
   const col = CC[r.category] ?? "#888"
   const d = new Date(r.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })
-  const icon: Record<string, string> = { Travel: "✈", Meals: "🍽", Office: "📦", Software: "💻", Home: "🏠", Medical: "⚕", Other: "📎" }
+  const icon: Record<string, string> = { Travel: "✈", Meals: "🍽", Office: "📦", Software: "💻", Home: "🏠", Medical: "⚕", Business: "💼", Other: "📎" }
   return (
-    <div className="bg-white border border-gray-100 rounded-xl p-3 flex items-center gap-3">
+    <div onClick={onClick} className="bg-white border border-gray-100 rounded-xl p-3 flex items-center gap-3 cursor-pointer hover:border-gray-300 transition-colors">
       <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm flex-shrink-0" style={{ background: col + "22", color: col }}>
         {icon[r.category] ?? "📎"}
       </div>
@@ -468,7 +539,7 @@ function ReceiptCard({ r }: { r: any }) {
   )
 }
 
-function ScanConfirmForm({ form, note, onChange, onSave, onDiscard }: any) {
+function ScanConfirmForm({ form, note, onChange, onSave, onDiscard, onDelete, saveLabel }: any) {
   const ded = calcDeductible(form.amount ?? 0, form.category ?? "Other", form.homePct)
   return (
     <div className="mb-3">
@@ -529,8 +600,11 @@ function ScanConfirmForm({ form, note, onChange, onSave, onDiscard }: any) {
         </div>
         <div className="flex gap-2 mt-3">
           <button onClick={onDiscard} className="flex-1 py-2 rounded-xl border border-gray-200 text-xs text-gray-500">Discard</button>
-          <button onClick={onSave} className="flex-1 py-2 rounded-xl bg-emerald-500 text-white text-xs font-medium">✓ Save &amp; sync</button>
+          <button onClick={onSave} className="flex-1 py-2 rounded-xl bg-emerald-500 text-white text-xs font-medium">{saveLabel ?? "✓ Save & sync"}</button>
         </div>
+        {onDelete && (
+          <button onClick={onDelete} className="w-full mt-2 py-2 rounded-xl border border-red-200 text-xs text-red-600">Delete receipt</button>
+        )}
         <p className="text-xs text-gray-400 text-center mt-2">* Required by IRS for audit protection</p>
       </div>
     </div>
@@ -654,7 +728,7 @@ function TaxesTab({ receipts, trips, isPro, onUpgrade }: any) {
   )
 }
 
-function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, emails, emailConnected, importedEmails, onFetchEmails, onImportEmail, onCheckout, onSignOut }: any) {
+function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, emails, emailConnected, importedEmails, onFetchEmails, onImportEmail, onDisconnectEmail, onCheckout, onSignOut }: any) {
   const PRICES: Record<string, any> = {
     proMonthly: process.env.NEXT_PUBLIC_STRIPE_PRO_MONTHLY ?? "",
     proAnnual: process.env.NEXT_PUBLIC_STRIPE_PRO_ANNUAL ?? "",
@@ -718,7 +792,12 @@ function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, email
 
       {/* Email import */}
       <div id="email-section" className="mt-2 mb-3">
-        <p className="text-sm font-medium mb-2">Email import</p>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-sm font-medium">Email import</p>
+          {emailConnected.length > 0 && (
+            <button onClick={onFetchEmails} className="text-xs text-gray-400 hover:text-gray-600 bg-transparent border-none cursor-pointer">↻ Check now</button>
+          )}
+        </div>
         <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden">
           {[{ provider: "google", label: "Gmail", icon: "📧" }, { provider: "azure-ad", label: "Outlook", icon: "📨" }].map(p => {
             const connected = emailConnected.includes(p.provider)
@@ -727,7 +806,10 @@ function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, email
                 <span className="text-lg">{p.icon}</span>
                 <div className="flex-1"><p className="text-sm font-medium">{p.label}</p><p className="text-xs text-gray-400">{connected ? session?.user?.email : "Not connected"}</p></div>
                 {connected
-                  ? <span className="text-xs bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full font-medium">Connected</span>
+                  ? <div className="flex items-center gap-2">
+                      <span className="text-xs bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full font-medium">Connected</span>
+                      <button onClick={() => onDisconnectEmail(p.provider)} className="text-xs text-gray-400 hover:text-red-600 cursor-pointer bg-transparent border-none">Disconnect</button>
+                    </div>
                   : <a href={isPro ? `/api/email/connect/${p.provider}` : undefined} onClick={e => { if (!isPro) { e.preventDefault(); alert("Email import requires Pro. Upgrade in Account.") } }} className="text-xs border border-gray-200 px-3 py-1.5 rounded-lg cursor-pointer no-underline text-gray-700">Connect</a>
                 }
               </div>

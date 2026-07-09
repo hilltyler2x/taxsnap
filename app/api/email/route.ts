@@ -20,7 +20,7 @@ async function extractReceipts(items: Candidate[]) {
       max_tokens: 1024,
       messages: [{
         role: "user",
-        content: `Below are ${items.length} emails from an inbox search for purchase-related messages. For each one that is genuinely a receipt, invoice, order confirmation, or payment confirmation, extract structured data. Skip any that are clearly not purchase-related (newsletters, notifications, social updates, etc).\n\nReturn ONLY a JSON array, no markdown, no commentary. Each item: {"index":0,"amount":0.00,"category":"Travel|Meals|Office|Software|Home|Medical|Other"}\n\nEmails:\n${listText}`,
+        content: `Below are ${items.length} emails from an inbox search for purchase-related messages. For each one that is genuinely a receipt, invoice, order confirmation, or payment confirmation, extract structured data. Skip any that are clearly not purchase-related (newsletters, notifications, social updates, etc).\n\nReturn ONLY a JSON array, no markdown, no commentary. Each item: {"index":0,"amount":0.00,"category":"Travel|Meals|Office|Software|Home|Medical|Business|Other"}\n\nEmails:\n${listText}`,
       }],
     })
     text = message.content[0].type === "text" ? message.content[0].text : "[]"

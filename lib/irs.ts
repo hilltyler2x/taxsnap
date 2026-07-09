@@ -7,6 +7,7 @@ export const DEDUCT_RATES: Record<string, number> = {
   Software: 1.0,
   Home: 0, // calculated from sq ft
   Medical: 0.5,
+  Business: 1.0,
   Other: 0.5,
 }
 
@@ -25,6 +26,7 @@ export const CATEGORIES = [
   "Software",
   "Home",
   "Medical",
+  "Business",
   "Other",
 ] as const
 

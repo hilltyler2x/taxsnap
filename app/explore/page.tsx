@@ -13,7 +13,7 @@ const DEMO_RECEIPTS = [
 
 const CC: Record<string, string> = {
   Travel: "#1D9E75", Meals: "#BA7517", Office: "#185FA5",
-  Software: "#534AB7", Home: "#3B6D11", Medical: "#A32D2D", Other: "#888780",
+  Software: "#534AB7", Home: "#3B6D11", Medical: "#A32D2D", Business: "#0F766E", Other: "#888780",
 }
 
 function ReceiptCard({ r }: { r: any }) {
@@ -22,7 +22,7 @@ function ReceiptCard({ r }: { r: any }) {
   return (
     <div style={{ background: "#fff", border: "1px solid #eee", borderRadius: "12px", padding: "10px 12px", display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
       <div style={{ width: "32px", height: "32px", borderRadius: "8px", background: col + "22", color: col, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "14px", flexShrink: 0 }}>
-        {{ Travel: "✈", Meals: "🍽", Office: "📦", Software: "💻", Home: "🏠", Medical: "⚕", Other: "📎" }[r.category] ?? "📎"}
+        {{ Travel: "✈", Meals: "🍽", Office: "📦", Software: "💻", Home: "🏠", Medical: "⚕", Business: "💼", Other: "📎" }[r.category] ?? "📎"}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <p style={{ margin: "0 0 2px", fontSize: "13px", fontWeight: "600", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</p>
