@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getCurrentUser } from "@/lib/auth"
 import { parseCsv } from "@/lib/csv"
 import { BUSINESS_PURPOSES } from "@/lib/irs"
+import { applyLearnedClassification } from "@/lib/learnedCategory"
 import Anthropic from "@anthropic-ai/sdk"
 
 const client = new Anthropic()
@@ -63,7 +64,8 @@ export async function POST(req: NextRequest) {
   const cleaned = text.replace(/```json\n?|\n?```/g, "").trim()
   const jsonMatch = cleaned.match(/\[[\s\S]*\]/)
   try {
-    const items = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned)
+    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned) as any[]
+    const items = await Promise.all(parsed.map(item => applyLearnedClassification(user.id, item)))
     return NextResponse.json({ items, truncated })
   } catch (err) {
     console.error("Could not parse CSV import response:", text)

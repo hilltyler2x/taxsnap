@@ -4,13 +4,14 @@ import { prisma } from "@/lib/prisma"
 import { listGmailReceiptCandidates } from "@/lib/googleOAuth"
 import { listOutlookReceiptCandidates, refreshMicrosoftToken } from "@/lib/microsoftOAuth"
 import { BUSINESS_PURPOSES } from "@/lib/irs"
+import { applyLearnedClassification } from "@/lib/learnedCategory"
 import Anthropic from "@anthropic-ai/sdk"
 
 const client = new Anthropic()
 
 type Candidate = { id: string; from: string; subject: string; date: string; snippet: string; provider: "google" | "azure-ad" }
 
-async function extractReceipts(items: Candidate[]) {
+async function extractReceipts(userId: string, items: Candidate[]) {
   if (!items.length) return []
   const listText = items.map((it, i) => `${i}. From: ${it.from}\nSubject: ${it.subject}\nDate: ${it.date}\nPreview: ${it.snippet}`).join("\n\n")
 
@@ -34,7 +35,7 @@ async function extractReceipts(items: Candidate[]) {
   const jsonMatch = cleaned.match(/\[[\s\S]*\]/)
   try {
     const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned) as { index: number; amount: number; category: string; purpose: string }[]
-    return parsed
+    const results = parsed
       .filter(p => items[p.index])
       .map(p => {
         const source = items[p.index]
@@ -48,6 +49,7 @@ async function extractReceipts(items: Candidate[]) {
           ...(source.provider === "google" ? { gmailId: source.id } : { outlookId: source.id }),
         }
       })
+    return Promise.all(results.map(r => applyLearnedClassification(userId, { ...r, name: r.from })))
   } catch (err) {
     console.error("Could not parse email extraction response:", text)
     return []
@@ -92,6 +94,6 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const emails = await extractReceipts(candidates)
+  const emails = await extractReceipts(user.id, candidates)
   return NextResponse.json({ emails, connected: tokens.map(t => t.provider) })
 }
