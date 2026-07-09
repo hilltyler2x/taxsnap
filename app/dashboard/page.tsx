@@ -60,6 +60,9 @@ export default function Dashboard() {
   const [scanForm, setScanForm] = useState<any>(null)
   const [editingReceipt, setEditingReceipt] = useState<any>(null)
   const [editForm, setEditForm] = useState<any>(null)
+  const [importPreview, setImportPreview] = useState<any[] | null>(null)
+  const [importSelected, setImportSelected] = useState<Set<number>>(new Set())
+  const [importing, setImporting] = useState(false)
   const [destSuggestions, setDestSuggestions] = useState<any[]>([])
   const [destTimer, setDestTimer] = useState<any>(null)
   const [importedEmails, setImportedEmails] = useState<Set<string>>(new Set())
@@ -277,6 +280,65 @@ export default function Dashboard() {
     }
   }
 
+  const handleCsvImport = async (file: File) => {
+    setImporting(true)
+    const fd = new FormData()
+    fd.append("file", file)
+    const res = await fetch("/api/receipts/import", { method: "POST", body: fd })
+    setImporting(false)
+    if (res.ok) {
+      const { items, truncated } = await res.json()
+      if (!items.length) { toast.error("Couldn't find any expenses in that file"); return }
+      setImportPreview(items)
+      setImportSelected(new Set(items.map((_: any, i: number) => i)))
+      if (truncated) toast("Only the first 60 rows were processed", { icon: "⚠️" })
+    } else {
+      const err = await res.json()
+      toast.error(err.error ?? "Import failed")
+      if (res.status === 403) setTab("account")
+    }
+  }
+
+  const handleSheetImport = async (url: string) => {
+    setImporting(true)
+    const res = await fetch("/api/receipts/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sheetUrl: url }),
+    })
+    setImporting(false)
+    if (res.ok) {
+      const { items, truncated } = await res.json()
+      if (!items.length) { toast.error("Couldn't find any expenses in that sheet"); return }
+      setImportPreview(items)
+      setImportSelected(new Set(items.map((_: any, i: number) => i)))
+      if (truncated) toast("Only the first 60 rows were processed", { icon: "⚠️" })
+    } else {
+      const err = await res.json()
+      toast.error(err.error ?? "Import failed")
+      if (res.status === 403) setTab("account")
+    }
+  }
+
+  const confirmImport = async () => {
+    if (!importPreview) return
+    let count = 0
+    for (const i of Array.from(importSelected)) {
+      const item = importPreview[i]
+      if (!item) continue
+      const res = await fetch("/api/receipts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...item, source: "import" }),
+      })
+      if (res.ok) count++
+    }
+    toast.success(`Imported ${count} receipt${count === 1 ? "" : "s"}`)
+    setImportPreview(null)
+    setImportSelected(new Set())
+    fetchReceipts()
+  }
+
   const startCheckout = async (priceId: string) => {
     const res = await fetch("/api/stripe", {
       method: "POST",
@@ -482,6 +544,9 @@ export default function Dashboard() {
             onImportEmail={importEmail}
             onDisconnectEmail={disconnectEmail}
             onCheckout={startCheckout}
+            onCsvFile={handleCsvImport}
+            onSheetUrl={handleSheetImport}
+            importing={importing}
           />
         )}
       </div>
@@ -499,6 +564,42 @@ export default function Dashboard() {
               onDelete={deleteReceiptEdit}
               saveLabel="✓ Save changes"
             />
+          </div>
+        </div>
+      )}
+
+      {/* Import preview modal */}
+      {importPreview && (
+        <div className="fixed inset-0 bg-black/40 z-20 flex items-end sm:items-center justify-center p-3" onClick={() => { setImportPreview(null); setImportSelected(new Set()) }}>
+          <div className="w-full max-w-lg max-h-[85vh] overflow-y-auto bg-white rounded-2xl p-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-medium">Review import — {importSelected.size} of {importPreview.length} selected</p>
+            </div>
+            <div className="space-y-2 mb-3">
+              {importPreview.map((item, i) => {
+                const checked = importSelected.has(i)
+                return (
+                  <label key={i} className="flex items-center gap-3 border border-gray-100 rounded-xl p-3 cursor-pointer">
+                    <input type="checkbox" checked={checked} onChange={() => {
+                      setImportSelected(prev => {
+                        const next = new Set(prev)
+                        if (checked) next.delete(i); else next.add(i)
+                        return next
+                      })
+                    }} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium truncate">{item.name || "(no name)"}</p>
+                      <p className="text-xs text-gray-400">{item.date} · {item.category}</p>
+                    </div>
+                    <p className="text-sm font-medium flex-shrink-0">${(item.amount ?? 0).toFixed(2)}</p>
+                  </label>
+                )
+              })}
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => { setImportPreview(null); setImportSelected(new Set()) }} className="flex-1 py-2 rounded-xl border border-gray-200 text-xs text-gray-500">Cancel</button>
+              <button onClick={confirmImport} disabled={!importSelected.size} className="flex-1 py-2 rounded-xl bg-emerald-500 text-white text-xs font-medium disabled:opacity-50">Import {importSelected.size} receipt{importSelected.size === 1 ? "" : "s"}</button>
+            </div>
           </div>
         </div>
       )}
@@ -728,7 +829,9 @@ function TaxesTab({ receipts, trips, isPro, onUpgrade }: any) {
   )
 }
 
-function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, emails, emailConnected, importedEmails, onFetchEmails, onImportEmail, onDisconnectEmail, onCheckout, onSignOut }: any) {
+function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, emails, emailConnected, importedEmails, onFetchEmails, onImportEmail, onDisconnectEmail, onCheckout, onSignOut, onCsvFile, onSheetUrl, importing }: any) {
+  const [sheetUrlInput, setSheetUrlInput] = useState("")
+  const csvRef = useRef<HTMLInputElement>(null)
   const PRICES: Record<string, any> = {
     proMonthly: process.env.NEXT_PUBLIC_STRIPE_PRO_MONTHLY ?? "",
     proAnnual: process.env.NEXT_PUBLIC_STRIPE_PRO_ANNUAL ?? "",
@@ -836,6 +939,43 @@ function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, email
             </div>
           </div>
         )}
+      </div>
+
+      {/* CSV / Google Sheet import */}
+      <div className="mb-3">
+        <p className="text-sm font-medium mb-2">Import your records</p>
+        <div className="bg-white border border-gray-100 rounded-2xl p-4">
+          <p className="text-xs text-gray-500 mb-3">Already tracking expenses in a spreadsheet? Import it here — AI reads whatever columns you have.</p>
+          <button
+            onClick={() => { if (!isPro) { alert("Bulk import requires Pro. Upgrade in Account."); return } csvRef.current?.click() }}
+            disabled={importing}
+            className="w-full bg-emerald-500 text-white rounded-xl py-2.5 text-xs font-medium mb-2 disabled:opacity-50"
+          >
+            {importing ? "Reading file..." : "📄 Upload CSV"}
+          </button>
+          <input ref={csvRef} type="file" accept=".csv,text/csv" className="hidden"
+            onChange={e => { if (e.target.files?.[0]) onCsvFile(e.target.files[0]); e.target.value = "" }} />
+          <div className="flex gap-2">
+            <input
+              value={sheetUrlInput}
+              onChange={e => setSheetUrlInput(e.target.value)}
+              placeholder="Paste a Google Sheets link..."
+              className="flex-1 text-xs border border-gray-200 rounded-lg px-3 py-2"
+            />
+            <button
+              onClick={() => {
+                if (!isPro) { alert("Bulk import requires Pro. Upgrade in Account."); return }
+                if (!sheetUrlInput.trim()) return
+                onSheetUrl(sheetUrlInput.trim())
+              }}
+              disabled={importing}
+              className="bg-gray-800 text-white px-4 py-2 rounded-lg text-xs font-medium border-none cursor-pointer disabled:opacity-50"
+            >
+              Import
+            </button>
+          </div>
+          <p className="text-xs text-gray-400 mt-2">Sheet must be shared as "Anyone with the link can view".</p>
+        </div>
       </div>
 
     </div>
