@@ -9,13 +9,13 @@ const ReceiptSchema = z.object({
   amount: z.number().positive(),
   date: z.string(),
   category: z.string(),
-  place: z.string().optional(),
-  purpose: z.string().optional(),
-  notes: z.string().optional(),
-  homePct: z.number().optional(),
+  place: z.string().nullable().optional(),
+  purpose: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  homePct: z.number().nullable().optional(),
   attendees: z.any().optional(),
-  source: z.string().optional(),
-  imageUrl: z.string().optional(),
+  source: z.string().nullable().optional(),
+  imageUrl: z.string().nullable().optional(),
 })
 
 export async function GET(req: NextRequest) {

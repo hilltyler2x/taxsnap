@@ -9,10 +9,10 @@ const ReceiptUpdateSchema = z.object({
   amount: z.number().positive(),
   date: z.string(),
   category: z.string(),
-  place: z.string().optional(),
-  purpose: z.string().optional(),
-  notes: z.string().optional(),
-  homePct: z.number().optional(),
+  place: z.string().nullable().optional(),
+  purpose: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  homePct: z.number().nullable().optional(),
   attendees: z.any().optional(),
 })
 

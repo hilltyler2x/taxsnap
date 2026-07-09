@@ -45,6 +45,18 @@ const DEMO_RECEIPTS = [
 type Tab = "home" | "receipts" | "miles" | "taxes" | "account"
 type ScanState = "idle" | "processing" | "confirm"
 
+// API errors are usually a plain string, but a validation failure can come
+// back as a Zod flatten() object — never hand a raw object to toast/alert.
+function errMsg(err: any, fallback: string): string {
+  if (typeof err?.error === "string") return err.error
+  const fieldErrors = err?.error?.fieldErrors
+  if (fieldErrors) {
+    const first = Object.values(fieldErrors).flat().find((v: any) => typeof v === "string")
+    if (first) return first as string
+  }
+  return fallback
+}
+
 export default function Dashboard() {
   const { isLoaded, isSignedIn, user: clerkUser } = useUser()
   const { signOut } = useClerk()
@@ -162,7 +174,7 @@ export default function Dashboard() {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
-        toast.error(err.error ?? "Could not read receipt — try a clearer photo")
+        toast.error(errMsg(err, "Could not read receipt — try a clearer photo"))
         setScanState("idle")
         return
       }
@@ -212,7 +224,7 @@ export default function Dashboard() {
       fetchReceipts()
     } else {
       const err = await res.json()
-      toast.error(err.error ?? "Failed to save")
+      toast.error(errMsg(err, "Failed to save"))
       if (res.status === 403) setTab("account")
     }
   }
@@ -236,7 +248,7 @@ export default function Dashboard() {
       fetchReceipts()
     } else {
       const err = await res.json()
-      toast.error(err.error ?? "Failed to update")
+      toast.error(errMsg(err, "Failed to update"))
     }
   }
 
@@ -260,7 +272,7 @@ export default function Dashboard() {
       body: JSON.stringify(data),
     })
     if (res.ok) { toast.success("Trip logged!"); fetchTrips() }
-    else { const e = await res.json(); toast.error(e.error ?? "Failed") }
+    else { const e = await res.json(); toast.error(errMsg(e, "Failed")) }
   }
 
   const importEmail = async (email: any) => {
@@ -294,7 +306,7 @@ export default function Dashboard() {
       if (truncated) toast("Only the first 60 rows were processed", { icon: "⚠️" })
     } else {
       const err = await res.json()
-      toast.error(err.error ?? "Import failed")
+      toast.error(errMsg(err, "Import failed"))
       if (res.status === 403) setTab("account")
     }
   }
@@ -315,7 +327,7 @@ export default function Dashboard() {
       if (truncated) toast("Only the first 60 rows were processed", { icon: "⚠️" })
     } else {
       const err = await res.json()
-      toast.error(err.error ?? "Import failed")
+      toast.error(errMsg(err, "Import failed"))
       if (res.status === 403) setTab("account")
     }
   }
@@ -811,7 +823,7 @@ function TaxesTab({ receipts, trips, isPro, onUpgrade }: any) {
 
   const handleExport = async () => {
     const res = await fetch("/api/export?format=csv")
-    if (!res.ok) { const e = await res.json(); alert(e.error); return }
+    if (!res.ok) { const e = await res.json(); alert(errMsg(e, "Export failed")); return }
     const blob = await res.blob()
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "taxsnap_irs_2025.csv"; a.click()
   }
