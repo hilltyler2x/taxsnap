@@ -13,6 +13,11 @@ function extractSheetId(url: string) {
   return m?.[1] ?? null
 }
 
+function extractGid(url: string) {
+  const m = url.match(/[?#&]gid=(\d+)/)
+  return m?.[1] ?? null
+}
+
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -33,13 +38,20 @@ export async function POST(req: NextRequest) {
     if (!sheetUrl) return NextResponse.json({ error: "No file or sheet link provided" }, { status: 400 })
     const sheetId = extractSheetId(sheetUrl)
     if (!sheetId) return NextResponse.json({ error: "Could not find a spreadsheet ID in that link" }, { status: 400 })
-    const res = await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`)
+    const gid = extractGid(sheetUrl)
+    const exportUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv${gid ? `&gid=${gid}` : ""}`
+    const res = await fetch(exportUrl)
     if (!res.ok) return NextResponse.json({ error: 'Could not access that sheet. Make sure it\'s shared as "Anyone with the link can view".' }, { status: 400 })
     csvText = await res.text()
+    if (/^\s*<(!doctype html|html)/i.test(csvText)) {
+      return NextResponse.json({ error: 'That link isn\'t publicly viewable. In Google Sheets, click Share → change to "Anyone with the link" → Viewer, then try again.' }, { status: 400 })
+    }
   }
 
   const rows = parseCsv(csvText)
-  if (!rows.length) return NextResponse.json({ error: "No rows found in that file" }, { status: 400 })
+  if (!rows.length) {
+    return NextResponse.json({ error: "No rows found in that file. If your data is on a specific tab, open that tab in your browser first so the URL includes #gid=..., then paste that exact URL." }, { status: 400 })
+  }
 
   const truncated = rows.length > MAX_ROWS + 1
   const sample = rows.slice(0, MAX_ROWS + 1)

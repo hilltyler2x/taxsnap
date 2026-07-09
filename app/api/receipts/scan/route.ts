@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getCurrentUser } from "@/lib/auth"
 import { BUSINESS_PURPOSES } from "@/lib/irs"
 import { applyLearnedClassification } from "@/lib/learnedCategory"
+import { put } from "@vercel/blob"
 import Anthropic from "@anthropic-ai/sdk"
 
 const client = new Anthropic()
@@ -44,7 +45,20 @@ export async function POST(req: NextRequest) {
   try {
     const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned)
     if (parsed.error) return NextResponse.json({ error: parsed.error }, { status: 400 })
-    const extracted = await applyLearnedClassification(user.id, parsed)
+
+    let imageUrl: string | undefined
+    try {
+      const blob = await put(`receipts/${user.id}/${Date.now()}.${mediaType.split("/")[1]}`, Buffer.from(bytes), {
+        access: "public",
+        contentType: mediaType,
+        addRandomSuffix: true,
+      })
+      imageUrl = blob.url
+    } catch (err) {
+      console.error("Failed to store receipt image:", err)
+    }
+
+    const extracted = await applyLearnedClassification(user.id, { ...parsed, imageUrl })
     return NextResponse.json({ extracted })
   } catch (err) {
     console.error("Could not parse receipt scan response:", text)

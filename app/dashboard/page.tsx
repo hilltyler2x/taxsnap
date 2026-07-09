@@ -637,9 +637,13 @@ function ReceiptCard({ r, onClick }: { r: any; onClick?: () => void }) {
   const icon: Record<string, string> = { Travel: "✈", Meals: "🍽", Office: "📦", Software: "💻", Home: "🏠", Medical: "⚕", Business: "💼", Other: "📎" }
   return (
     <div onClick={onClick} className="bg-white border border-gray-100 rounded-xl p-3 flex items-center gap-3 cursor-pointer hover:border-gray-300 transition-colors">
-      <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm flex-shrink-0" style={{ background: col + "22", color: col }}>
-        {icon[r.category] ?? "📎"}
-      </div>
+      {r.imageUrl ? (
+        <img src={r.imageUrl} alt="" className="w-8 h-8 rounded-lg object-cover flex-shrink-0" />
+      ) : (
+        <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm flex-shrink-0" style={{ background: col + "22", color: col }}>
+          {icon[r.category] ?? "📎"}
+        </div>
+      )}
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">{r.name}</p>
         <p className="text-xs text-gray-400 truncate">{d}{r.purpose ? " · " + r.purpose : ""}</p>
@@ -667,6 +671,9 @@ function ScanConfirmForm({ form, note, onChange, onSave, onDiscard, onDelete, sa
           <p className="text-xs font-medium text-emerald-700">✦ Edit &amp; confirm</p>
           <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full">IRS fields</span>
         </div>
+        {form.imageUrl && (
+          <img src={form.imageUrl} alt="Receipt" className="w-full max-h-48 object-contain rounded-lg border border-gray-100 mb-3 bg-gray-50" />
+        )}
         {[
           { key: "name", label: "Merchant *" },
           { key: "amount", label: "Amount *", type: "number" },
@@ -828,6 +835,73 @@ function TaxesTab({ receipts, trips, isPro, onUpgrade }: any) {
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "taxsnap_irs_2025.csv"; a.click()
   }
 
+  const handleExportPdf = async () => {
+    const { default: jsPDF } = await import("jspdf")
+    await import("jspdf-autotable")
+    const doc = new jsPDF() as any
+    const year = new Date().getFullYear()
+
+    doc.setFontSize(18)
+    doc.text("TaxSnap — Expense Summary", 14, 20)
+    doc.setFontSize(10)
+    doc.setTextColor(120)
+    doc.text(`Generated ${new Date().toLocaleDateString()}`, 14, 26)
+
+    doc.setFontSize(12)
+    doc.setTextColor(0)
+    doc.text(`Total deductible: $${total.toFixed(2)}`, 14, 36)
+    doc.text(`Estimated tax savings (22% bracket): $${(total * 0.22).toFixed(2)}`, 14, 42)
+
+    doc.autoTable({
+      startY: 50,
+      head: [["Category", "Amount"]],
+      body: Object.entries(bycat).sort((a, b) => (b[1] as number) - (a[1] as number)).map(([cat, amt]) => [cat, `$${(amt as number).toFixed(2)}`]),
+      theme: "striped",
+      headStyles: { fillColor: [16, 122, 87] },
+    })
+
+    let y = doc.lastAutoTable.finalY + 10
+    doc.setFontSize(12)
+    doc.text("Receipts", 14, y)
+    doc.autoTable({
+      startY: y + 4,
+      head: [["Date", "Merchant", "Category", "Purpose", "Amount", "Deductible"]],
+      body: receipts.map((r: any) => [
+        new Date(r.date).toLocaleDateString(),
+        r.name,
+        r.category,
+        r.purpose ?? "",
+        `$${r.amount.toFixed(2)}`,
+        `$${(r.deductible ?? 0).toFixed(2)}`,
+      ]),
+      theme: "striped",
+      headStyles: { fillColor: [16, 122, 87] },
+      styles: { fontSize: 8 },
+    })
+
+    if (trips.length) {
+      y = doc.lastAutoTable.finalY + 10
+      doc.setFontSize(12)
+      doc.text("Mileage", 14, y)
+      doc.autoTable({
+        startY: y + 4,
+        head: [["Date", "Destination", "Purpose", "Miles", "Deductible"]],
+        body: trips.map((t: any) => [
+          new Date(t.date).toLocaleDateString(),
+          t.destination,
+          t.purpose,
+          t.miles,
+          `$${(t.deductible ?? 0).toFixed(2)}`,
+        ]),
+        theme: "striped",
+        headStyles: { fillColor: [37, 99, 235] },
+        styles: { fontSize: 8 },
+      })
+    }
+
+    doc.save(`taxsnap_summary_${year}.pdf`)
+  }
+
   return (
     <div>
       <div className="grid grid-cols-2 gap-2 mb-3">
@@ -849,7 +923,7 @@ function TaxesTab({ receipts, trips, isPro, onUpgrade }: any) {
       {isPro ? (
         <div className="space-y-2">
           <button onClick={handleExport} className="w-full bg-emerald-500 text-white py-3 rounded-xl text-sm font-medium">📊 Download IRS-ready CSV</button>
-          <button className="w-full border border-gray-200 py-3 rounded-xl text-sm font-medium text-gray-700">📄 Export PDF summary</button>
+          <button onClick={handleExportPdf} className="w-full border border-gray-200 py-3 rounded-xl text-sm font-medium text-gray-700">📄 Export PDF summary</button>
         </div>
       ) : <LockScreen icon="📊" title="Export is Pro" sub="Download IRS-ready CSV and PDF for your accountant. Upgrade for $5/month." onUpgrade={onUpgrade} />}
     </div>
