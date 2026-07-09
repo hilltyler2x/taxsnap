@@ -2,7 +2,7 @@
 import { useUser, useClerk } from "@clerk/nextjs"
 import { useEffect, useState, useRef } from "react"
 import toast from "react-hot-toast"
-import { calcDeductible, IRS_MILEAGE_RATE, CATEGORIES } from "@/lib/irs"
+import { calcDeductible, IRS_MILEAGE_RATE, CATEGORIES, BUSINESS_PURPOSES } from "@/lib/irs"
 
 const CC: Record<string, string> = {
   Travel: "#1D9E75", Meals: "#BA7517", Office: "#185FA5",
@@ -36,10 +36,10 @@ const ADDRESS_SUGGESTIONS = [
 ]
 
 const DEMO_RECEIPTS = [
-  { name: "Delta Airlines", amount: 487.50, date: "2025-06-10", category: "Travel", place: "Atlanta, GA", purpose: "NYC conference — annual summit", notes: "" },
-  { name: "Nobu Restaurant", amount: 143.20, date: "2025-06-12", category: "Meals", place: "New York, NY", purpose: "Client dinner — contract discussion", notes: "" },
-  { name: "Microsoft 365", amount: 99.99, date: "2025-06-01", category: "Software", place: "Online", purpose: "Office suite for business", notes: "" },
-  { name: "FedEx Shipping", amount: 28.40, date: "2025-06-08", category: "Office", place: "Decatur, GA", purpose: "Shipping client documents", notes: "" },
+  { name: "Delta Airlines", amount: 487.50, date: "2025-06-10", category: "Travel", place: "Atlanta, GA", purpose: "Business travel — conference or training", notes: "" },
+  { name: "Nobu Restaurant", amount: 143.20, date: "2025-06-12", category: "Meals", place: "New York, NY", purpose: "Business meal — client or prospect", notes: "" },
+  { name: "Microsoft 365", amount: 99.99, date: "2025-06-01", category: "Software", place: "Online", purpose: "Software or subscription for business use", notes: "" },
+  { name: "FedEx Shipping", amount: 28.40, date: "2025-06-08", category: "Office", place: "Decatur, GA", purpose: "Shipping and postage", notes: "" },
 ]
 
 type Tab = "home" | "receipts" | "miles" | "taxes" | "account"
@@ -269,7 +269,7 @@ export default function Dashboard() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: email.from, amount: email.amount, date: email.date,
-        category: email.category, purpose: email.subject, source: "email",
+        category: email.category, purpose: email.purpose ?? email.subject, source: "email",
       }),
     })
     if (res.ok) {
@@ -660,7 +660,6 @@ function ScanConfirmForm({ form, note, onChange, onSave, onDiscard, onDelete, sa
           { key: "amount", label: "Amount *", type: "number" },
           { key: "date", label: "Date *", type: "date" },
           { key: "place", label: "Place *" },
-          { key: "purpose", label: "Business purpose *" },
         ].map(f => (
           <div key={f.key} className="flex justify-between items-center py-1.5 border-b border-gray-100">
             <span className="text-xs text-gray-500">{f.label}</span>
@@ -677,6 +676,19 @@ function ScanConfirmForm({ form, note, onChange, onSave, onDiscard, onDelete, sa
           <select value={form.category ?? "Other"} onChange={e => onChange({ ...form, category: e.target.value })}
             className="text-xs font-medium bg-transparent border-none outline-none cursor-pointer">
             {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+          </select>
+        </div>
+        <div className="flex justify-between items-center py-1.5 border-b border-gray-100">
+          <span className="text-xs text-gray-500">Business purpose *</span>
+          <select
+            value={(BUSINESS_PURPOSES as readonly string[]).includes(form.purpose) ? form.purpose : "__custom__"}
+            onChange={e => onChange({ ...form, purpose: e.target.value === "__custom__" ? form.purpose : e.target.value })}
+            className="text-xs font-medium text-right bg-transparent border-none outline-none cursor-pointer w-44"
+          >
+            {!(BUSINESS_PURPOSES as readonly string[]).includes(form.purpose) && form.purpose && (
+              <option value="__custom__">{form.purpose}</option>
+            )}
+            {BUSINESS_PURPOSES.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
         </div>
         {form.category === "Meals" && (
@@ -740,7 +752,10 @@ function MilesTab({ trips, onSave, onDestInput, suggestions, onSelectDest }: any
         <p className="text-sm font-medium">Log a trip</p>
         <div>
           <label className="text-xs text-gray-500 block mb-1">Business purpose *</label>
-          <input value={form.purpose} onChange={e => setForm({ ...form, purpose: e.target.value })} placeholder="e.g. Client meeting at Acme Co." className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2" />
+          <select value={form.purpose} onChange={e => setForm({ ...form, purpose: e.target.value })} className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white">
+            <option value="" disabled>Select a reason...</option>
+            {BUSINESS_PURPOSES.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
         </div>
         <div className="relative">
           <label className="text-xs text-gray-500 block mb-1">Destination *</label>

@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { listGmailReceiptCandidates } from "@/lib/googleOAuth"
 import { listOutlookReceiptCandidates, refreshMicrosoftToken } from "@/lib/microsoftOAuth"
+import { BUSINESS_PURPOSES } from "@/lib/irs"
 import Anthropic from "@anthropic-ai/sdk"
 
 const client = new Anthropic()
@@ -20,7 +21,7 @@ async function extractReceipts(items: Candidate[]) {
       max_tokens: 1024,
       messages: [{
         role: "user",
-        content: `Below are ${items.length} emails from an inbox search for purchase-related messages. For each one that is genuinely a receipt, invoice, order confirmation, or payment confirmation, extract structured data. Skip any that are clearly not purchase-related (newsletters, notifications, social updates, etc).\n\nReturn ONLY a JSON array, no markdown, no commentary. Each item: {"index":0,"amount":0.00,"category":"Travel|Meals|Office|Software|Home|Medical|Business|Other"}\n\nEmails:\n${listText}`,
+        content: `Below are ${items.length} emails from an inbox search for purchase-related messages. For each one that is genuinely a receipt, invoice, order confirmation, or payment confirmation, extract structured data. Skip any that are clearly not purchase-related (newsletters, notifications, social updates, etc).\n\nReturn ONLY a JSON array, no markdown, no commentary. Each item: {"index":0,"amount":0.00,"category":"Travel|Meals|Office|Software|Home|Medical|Business|Other","purpose":"one of: ${BUSINESS_PURPOSES.join(" | ")}"}\n\nPick the single closest matching purpose from that list — do not invent a new one.\n\nEmails:\n${listText}`,
       }],
     })
     text = message.content[0].type === "text" ? message.content[0].text : "[]"
@@ -32,7 +33,7 @@ async function extractReceipts(items: Candidate[]) {
   const cleaned = text.replace(/```json\n?|\n?```/g, "").trim()
   const jsonMatch = cleaned.match(/\[[\s\S]*\]/)
   try {
-    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned) as { index: number; amount: number; category: string }[]
+    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned) as { index: number; amount: number; category: string; purpose: string }[]
     return parsed
       .filter(p => items[p.index])
       .map(p => {
@@ -43,6 +44,7 @@ async function extractReceipts(items: Candidate[]) {
           date: source.date,
           amount: p.amount,
           category: p.category,
+          purpose: p.purpose,
           ...(source.provider === "google" ? { gmailId: source.id } : { outlookId: source.id }),
         }
       })

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getCurrentUser } from "@/lib/auth"
 import { parseCsv } from "@/lib/csv"
+import { BUSINESS_PURPOSES } from "@/lib/irs"
 import Anthropic from "@anthropic-ai/sdk"
 
 const client = new Anthropic()
@@ -50,7 +51,7 @@ export async function POST(req: NextRequest) {
       max_tokens: 4096,
       messages: [{
         role: "user",
-        content: `Below is data exported from a spreadsheet someone used to track business expenses/receipts before switching to this app. The first row is likely a header, but column names and layout can vary widely — infer what each column means from context.\n\nFor each row that represents a real expense/receipt (skip blank rows, totals, or non-expense rows), extract:\n{"name":"merchant/vendor","amount":0.00,"date":"YYYY-MM-DD","category":"Travel|Meals|Office|Software|Home|Medical|Business|Other","place":"","purpose":""}\n\nReturn ONLY a JSON array, no markdown, no commentary. If a field truly isn't inferable, use an empty string for it.\n\nData:\n${tableText}`,
+        content: `Below is data exported from a spreadsheet someone used to track business expenses/receipts before switching to this app. The first row is likely a header, but column names and layout can vary widely — infer what each column means from context.\n\nFor each row that represents a real expense/receipt (skip blank rows, totals, or non-expense rows), extract:\n{"name":"merchant/vendor","amount":0.00,"date":"YYYY-MM-DD","category":"Travel|Meals|Office|Software|Home|Medical|Business|Other","place":"","purpose":"one of: ${BUSINESS_PURPOSES.join(" | ")}"}\n\nPick the single closest matching purpose from that list for each row — do not invent a new one. Return ONLY a JSON array, no markdown, no commentary. If a field other than purpose truly isn't inferable, use an empty string for it.\n\nData:\n${tableText}`,
       }],
     })
     text = message.content[0].type === "text" ? message.content[0].text : "[]"

@@ -32,6 +32,29 @@ export const CATEGORIES = [
 
 export type Category = (typeof CATEGORIES)[number]
 
+// IRS wants a specific, ordinary-and-necessary business reason on file —
+// vague purposes ("stuff", "misc") are what get deductions thrown out in an audit.
+export const BUSINESS_PURPOSES = [
+  "Client meeting or consultation",
+  "Business travel — client visit",
+  "Business travel — conference or training",
+  "Marketing and advertising",
+  "Inventory purchase for resale",
+  "Office supplies and equipment",
+  "Professional development / continuing education",
+  "Software or subscription for business use",
+  "Contractor or vendor payment",
+  "Business meal — client or prospect",
+  "Home office expense",
+  "Insurance premium (business)",
+  "Legal or professional fees",
+  "Shipping and postage",
+  "Repairs and maintenance",
+  "Other ordinary and necessary business expense",
+] as const
+
+export type BusinessPurpose = (typeof BUSINESS_PURPOSES)[number]
+
 export function calcDeductible(
   amount: number,
   category: string,

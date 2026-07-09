@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getCurrentUser } from "@/lib/auth"
+import { BUSINESS_PURPOSES } from "@/lib/irs"
 import Anthropic from "@anthropic-ai/sdk"
 
 const client = new Anthropic()
@@ -27,7 +28,7 @@ export async function POST(req: NextRequest) {
         role: "user",
         content: [
           { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
-          { type: "text", text: `You're extracting data from a photo of a business expense document — this could be a receipt, invoice, bill, order confirmation, statement, or similar. Read every visible field carefully, even if the photo is angled, blurry, dim, low-resolution, or partially cropped — always give your best-effort extraction rather than giving up.\n\nReturn ONLY valid JSON, no markdown, no commentary:\n{"name":"merchant or vendor name","amount":0.00,"date":"YYYY-MM-DD","place":"city or online","category":"Travel|Meals|Office|Software|Home|Medical|Business|Other","purpose":"likely business reason","notes":""}\n\nOnly return {"error":"not a business document"} if the photo is clearly unrelated to any purchase, expense, invoice, or receipt (e.g. a selfie, landscape, random object, or blank page). Do not reject a real document just because it's blurry, low quality, or an unusual format.` }
+          { type: "text", text: `You're extracting data from a photo of a business expense document — this could be a receipt, invoice, bill, order confirmation, statement, or similar. Read every visible field carefully, even if the photo is angled, blurry, dim, low-resolution, or partially cropped — always give your best-effort extraction rather than giving up.\n\nReturn ONLY valid JSON, no markdown, no commentary:\n{"name":"merchant or vendor name","amount":0.00,"date":"YYYY-MM-DD","place":"city or online","category":"Travel|Meals|Office|Software|Home|Medical|Business|Other","purpose":"one of: ${BUSINESS_PURPOSES.join(" | ")}","notes":""}\n\nPick the single closest matching purpose from that list — do not invent a new one. Only return {"error":"not a business document"} if the photo is clearly unrelated to any purchase, expense, invoice, or receipt (e.g. a selfie, landscape, random object, or blank page). Do not reject a real document just because it's blurry, low quality, or an unusual format.` }
         ]
       }]
     })
