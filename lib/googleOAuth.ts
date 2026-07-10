@@ -1,6 +1,10 @@
 import { google } from "googleapis"
 
-export const GOOGLE_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+export const GOOGLE_SCOPES = [
+  "https://www.googleapis.com/auth/gmail.readonly",
+  "https://www.googleapis.com/auth/spreadsheets.readonly",
+  "https://www.googleapis.com/auth/drive.metadata.readonly",
+]
 export const GOOGLE_REDIRECT_URI = `${process.env.APP_URL}/api/email/callback/google`
 
 export function getGoogleOAuthClient() {
@@ -42,4 +46,43 @@ export async function listGmailReceiptCandidates(token: { accessToken: string; r
   }
 
   return { items, refreshedTokens }
+}
+
+type GoogleToken = { accessToken: string; refreshToken: string | null }
+type RefreshedTokens = { access_token?: string | null; expiry_date?: number | null } | null
+
+function authClientFor(token: GoogleToken) {
+  const authClient = getGoogleOAuthClient()
+  authClient.setCredentials({ access_token: token.accessToken, refresh_token: token.refreshToken ?? undefined })
+  let refreshedTokens: RefreshedTokens = null
+  authClient.on("tokens", (tokens) => { refreshedTokens = tokens })
+  return { authClient, getRefreshedTokens: () => refreshedTokens }
+}
+
+export async function listGoogleSheets(token: GoogleToken) {
+  const { authClient, getRefreshedTokens } = authClientFor(token)
+  const drive = google.drive({ version: "v3", auth: authClient })
+  const res = await drive.files.list({
+    q: "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false",
+    fields: "files(id,name)",
+    pageSize: 50,
+    orderBy: "modifiedTime desc",
+  })
+  return { files: res.data.files ?? [], refreshedTokens: getRefreshedTokens() }
+}
+
+export async function listSheetTabs(token: GoogleToken, spreadsheetId: string) {
+  const { authClient, getRefreshedTokens } = authClientFor(token)
+  const sheets = google.sheets({ version: "v4", auth: authClient })
+  const res = await sheets.spreadsheets.get({ spreadsheetId, fields: "sheets.properties.title" })
+  const tabs = (res.data.sheets ?? []).map(s => s.properties?.title).filter((t): t is string => !!t)
+  return { tabs, refreshedTokens: getRefreshedTokens() }
+}
+
+export async function getSheetValues(token: GoogleToken, spreadsheetId: string, sheetName: string) {
+  const { authClient, getRefreshedTokens } = authClientFor(token)
+  const sheets = google.sheets({ version: "v4", auth: authClient })
+  const res = await sheets.spreadsheets.values.get({ spreadsheetId, range: sheetName })
+  const rows = (res.data.values ?? []).map(row => row.map(cell => String(cell ?? "")))
+  return { rows, refreshedTokens: getRefreshedTokens() }
 }

@@ -75,6 +75,8 @@ export default function Dashboard() {
   const [importPreview, setImportPreview] = useState<any[] | null>(null)
   const [importSelected, setImportSelected] = useState<Set<number>>(new Set())
   const [importing, setImporting] = useState(false)
+  const [sheetFiles, setSheetFiles] = useState<{ id: string; name: string }[] | null>(null)
+  const [sheetTabs, setSheetTabs] = useState<{ file: { id: string; name: string }; tabs: string[] } | null>(null)
   const [destSuggestions, setDestSuggestions] = useState<any[]>([])
   const [destTimer, setDestTimer] = useState<any>(null)
   const [importedEmails, setImportedEmails] = useState<Set<string>>(new Set())
@@ -332,6 +334,61 @@ export default function Dashboard() {
     }
   }
 
+  const browseSheets = async () => {
+    setImporting(true)
+    const res = await fetch("/api/sheets/list")
+    setImporting(false)
+    if (res.ok) {
+      const { files } = await res.json()
+      if (!files.length) { toast.error("No spreadsheets found in your Google Drive"); return }
+      setSheetFiles(files)
+    } else {
+      const err = await res.json()
+      toast.error(errMsg(err, "Could not list your Google Sheets"))
+      if (res.status === 403) setTab("account")
+    }
+  }
+
+  const pickSheetFile = async (file: { id: string; name: string }) => {
+    setImporting(true)
+    const res = await fetch(`/api/sheets/tabs?id=${encodeURIComponent(file.id)}`)
+    setImporting(false)
+    if (!res.ok) {
+      const err = await res.json()
+      toast.error(errMsg(err, "Could not read that spreadsheet"))
+      return
+    }
+    const { tabs } = await res.json()
+    if (tabs.length <= 1) {
+      setSheetFiles(null)
+      importFromSheet(file.id, tabs[0] ?? "Sheet1")
+    } else {
+      setSheetFiles(null)
+      setSheetTabs({ file, tabs })
+    }
+  }
+
+  const importFromSheet = async (spreadsheetId: string, sheetName: string) => {
+    setImporting(true)
+    const res = await fetch("/api/sheets/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ spreadsheetId, sheetName }),
+    })
+    setImporting(false)
+    setSheetTabs(null)
+    if (res.ok) {
+      const { items, truncated } = await res.json()
+      if (!items.length) { toast.error("Couldn't find any expenses in that tab"); return }
+      setImportPreview(items)
+      setImportSelected(new Set(items.map((_: any, i: number) => i)))
+      if (truncated) toast("Only the first 60 rows were processed", { icon: "⚠️" })
+    } else {
+      const err = await res.json()
+      toast.error(errMsg(err, "Import failed"))
+    }
+  }
+
   const confirmImport = async () => {
     if (!importPreview) return
     let count = 0
@@ -559,6 +616,13 @@ export default function Dashboard() {
             onCsvFile={handleCsvImport}
             onSheetUrl={handleSheetImport}
             importing={importing}
+            onBrowseSheets={browseSheets}
+            sheetFiles={sheetFiles}
+            onPickSheetFile={pickSheetFile}
+            onCloseSheetFiles={() => setSheetFiles(null)}
+            sheetTabs={sheetTabs}
+            onPickSheetTab={(tab: string) => sheetTabs && importFromSheet(sheetTabs.file.id, tab)}
+            onCloseSheetTabs={() => setSheetTabs(null)}
           />
         )}
       </div>
@@ -930,7 +994,7 @@ function TaxesTab({ receipts, trips, isPro, onUpgrade }: any) {
   )
 }
 
-function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, emails, emailConnected, importedEmails, onFetchEmails, onImportEmail, onDisconnectEmail, onCheckout, onSignOut, onCsvFile, onSheetUrl, importing }: any) {
+function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, emails, emailConnected, importedEmails, onFetchEmails, onImportEmail, onDisconnectEmail, onCheckout, onSignOut, onCsvFile, onSheetUrl, importing, onBrowseSheets, sheetFiles, onPickSheetFile, onCloseSheetFiles, sheetTabs, onPickSheetTab, onCloseSheetTabs }: any) {
   const [sheetUrlInput, setSheetUrlInput] = useState("")
   const csvRef = useRef<HTMLInputElement>(null)
   const PRICES: Record<string, any> = {
@@ -1076,8 +1140,61 @@ function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, email
             </button>
           </div>
           <p className="text-xs text-gray-400 mt-2">Sheet must be shared as "Anyone with the link can view".</p>
+          <div className="border-t border-gray-100 mt-3 pt-3">
+            {emailConnected.includes("google") ? (
+              <button
+                onClick={() => { if (!isPro) { alert("Bulk import requires Pro. Upgrade in Account."); return } onBrowseSheets() }}
+                disabled={importing}
+                className="w-full border border-gray-200 rounded-xl py-2.5 text-xs font-medium text-gray-700 disabled:opacity-50"
+              >
+                {importing ? "Loading..." : "🔗 Browse your Google Sheets"}
+              </button>
+            ) : (
+              <a
+                href={isPro ? "/api/email/connect/google" : undefined}
+                onClick={e => { if (!isPro) { e.preventDefault(); alert("Bulk import requires Pro. Upgrade in Account.") } }}
+                className="w-full block text-center border border-gray-200 rounded-xl py-2.5 text-xs font-medium text-gray-700 no-underline cursor-pointer"
+              >
+                🔗 Connect Google to browse Sheets directly
+              </a>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Google Sheets file picker */}
+      {sheetFiles && (
+        <div className="fixed inset-0 bg-black/40 z-20 flex items-end sm:items-center justify-center p-3" onClick={onCloseSheetFiles}>
+          <div className="w-full max-w-lg max-h-[70vh] overflow-y-auto bg-white rounded-2xl p-4" onClick={(e: any) => e.stopPropagation()}>
+            <p className="text-sm font-medium mb-3">Choose a spreadsheet</p>
+            <div className="space-y-1">
+              {sheetFiles.map((f: any) => (
+                <button key={f.id} onClick={() => onPickSheetFile(f)} className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-gray-50 border-none bg-transparent cursor-pointer text-sm">
+                  📊 {f.name}
+                </button>
+              ))}
+            </div>
+            <button onClick={onCloseSheetFiles} className="w-full mt-3 py-2 rounded-xl border border-gray-200 text-xs text-gray-500">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* Google Sheets tab picker */}
+      {sheetTabs && (
+        <div className="fixed inset-0 bg-black/40 z-20 flex items-end sm:items-center justify-center p-3" onClick={onCloseSheetTabs}>
+          <div className="w-full max-w-lg max-h-[70vh] overflow-y-auto bg-white rounded-2xl p-4" onClick={(e: any) => e.stopPropagation()}>
+            <p className="text-sm font-medium mb-3">{sheetTabs.file.name} — choose a tab</p>
+            <div className="space-y-1">
+              {sheetTabs.tabs.map((t: string) => (
+                <button key={t} onClick={() => onPickSheetTab(t)} className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-gray-50 border-none bg-transparent cursor-pointer text-sm">
+                  {t}
+                </button>
+              ))}
+            </div>
+            <button onClick={onCloseSheetTabs} className="w-full mt-3 py-2 rounded-xl border border-gray-200 text-xs text-gray-500">Cancel</button>
+          </div>
+        </div>
+      )}
 
     </div>
   )

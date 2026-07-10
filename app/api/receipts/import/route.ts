@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getCurrentUser } from "@/lib/auth"
 import { parseCsv } from "@/lib/csv"
-import { BUSINESS_PURPOSES } from "@/lib/irs"
-import { applyLearnedClassification } from "@/lib/learnedCategory"
-import Anthropic from "@anthropic-ai/sdk"
-
-const client = new Anthropic()
-const MAX_ROWS = 60
+import { extractExpensesFromTable } from "@/lib/expenseExtraction"
 
 function extractSheetId(url: string) {
   const m = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)
@@ -53,34 +48,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No rows found in that file. If your data is on a specific tab, open that tab in your browser first so the URL includes #gid=..., then paste that exact URL." }, { status: 400 })
   }
 
-  const truncated = rows.length > MAX_ROWS + 1
-  const sample = rows.slice(0, MAX_ROWS + 1)
-  const tableText = sample.map(r => r.join(" | ")).join("\n")
-
-  let text = ""
   try {
-    const message = await client.messages.create({
-      model: "claude-sonnet-5",
-      max_tokens: 4096,
-      messages: [{
-        role: "user",
-        content: `Below is data exported from a spreadsheet someone used to track business expenses/receipts before switching to this app. The first row is likely a header, but column names and layout can vary widely — infer what each column means from context.\n\nFor each row that represents a real expense/receipt (skip blank rows, totals, or non-expense rows), extract:\n{"name":"merchant/vendor","amount":0.00,"date":"YYYY-MM-DD","category":"Travel|Meals|Office|Software|Home|Medical|Business|Other","place":"","purpose":"one of: ${BUSINESS_PURPOSES.join(" | ")}"}\n\nPick the single closest matching purpose from that list for each row — do not invent a new one. Return ONLY a JSON array, no markdown, no commentary. If a field other than purpose truly isn't inferable, use an empty string for it.\n\nData:\n${tableText}`,
-      }],
-    })
-    text = message.content[0].type === "text" ? message.content[0].text : "[]"
-  } catch (err) {
-    console.error("CSV import extraction failed:", err)
-    return NextResponse.json({ error: "Could not process that file. Try again in a moment." }, { status: 502 })
-  }
-
-  const cleaned = text.replace(/```json\n?|\n?```/g, "").trim()
-  const jsonMatch = cleaned.match(/\[[\s\S]*\]/)
-  try {
-    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned) as any[]
-    const items = await Promise.all(parsed.map(item => applyLearnedClassification(user.id, item)))
+    const { items, truncated } = await extractExpensesFromTable(user.id, rows)
     return NextResponse.json({ items, truncated })
-  } catch (err) {
-    console.error("Could not parse CSV import response:", text)
-    return NextResponse.json({ error: "Could not read that data. Try a simpler export." }, { status: 400 })
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message ?? "Could not process that file." }, { status: 502 })
   }
 }
