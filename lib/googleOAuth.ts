@@ -14,7 +14,10 @@ export function getGoogleOAuthClient() {
 export function getGoogleAuthUrl(state: string) {
   return getGoogleOAuthClient().generateAuthUrl({
     access_type: "offline",
-    prompt: "consent",
+    // select_account forces the account chooser every time, so the
+    // Gmail/Sheets connection can be a different Google account than
+    // whichever one the user signed into TaxSnap with.
+    prompt: "select_account consent",
     scope: GOOGLE_SCOPES,
     state,
   })
