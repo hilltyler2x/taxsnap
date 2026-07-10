@@ -22,7 +22,7 @@ async function extractReceipts(userId: string, items: Candidate[]) {
       max_tokens: 4096,
       messages: [{
         role: "user",
-        content: `Below are ${items.length} emails from an inbox search for purchase-related messages. For each one that is genuinely a receipt, invoice, order confirmation, or payment confirmation, extract structured data. Skip any that are clearly not purchase-related (newsletters, notifications, social updates, etc).\n\nReturn ONLY a JSON array, no markdown, no commentary. Each item: {"index":0,"amount":0.00,"category":"Travel|Meals|Office|Software|Home|Medical|Business|Other","purpose":"one of: ${BUSINESS_PURPOSES.join(" | ")}"}\n\nPick the single closest matching purpose from that list — do not invent a new one.\n\nEmails:\n${listText}`,
+        content: `Below are ${items.length} emails from an inbox search for purchase-related messages. For each one that is genuinely a receipt, invoice, order confirmation, or payment confirmation, extract structured data. Skip any that are clearly not purchase-related (newsletters, notifications, social updates, etc).\n\nReturn ONLY a JSON array, no markdown, no commentary. Each item: {"index":0,"amount":0.00,"category":"Travel|Meals|Office|Software|Home|Medical|Business|Other","purpose":"one of: ${BUSINESS_PURPOSES.join(" | ")}","auditFlag":true,"auditNote":""}\n\nPick the single closest matching purpose from that list — do not invent a new one.\n\nFor auditFlag/auditNote, think like an IRS auditor. Set auditFlag to true if this is likely to draw scrutiny as recorded (e.g. no itemized description, reads as possibly personal). If flagged, auditNote must be one short, specific, actionable sentence. Otherwise set auditFlag to false and leave auditNote empty.\n\nEmails:\n${listText}`,
       }],
     })
     const textBlock = message.content.find((b: any) => b.type === "text") as any
@@ -35,7 +35,7 @@ async function extractReceipts(userId: string, items: Candidate[]) {
   const cleaned = text.replace(/```json\n?|\n?```/g, "").trim()
   const jsonMatch = cleaned.match(/\[[\s\S]*\]/)
   try {
-    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned) as { index: number; amount: number; category: string; purpose: string }[]
+    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned) as { index: number; amount: number; category: string; purpose: string; auditFlag?: boolean; auditNote?: string }[]
     const results = parsed
       .filter(p => items[p.index])
       .map(p => {
@@ -47,6 +47,8 @@ async function extractReceipts(userId: string, items: Candidate[]) {
           amount: p.amount,
           category: p.category,
           purpose: p.purpose,
+          auditFlag: p.auditFlag ?? false,
+          auditNote: p.auditNote ?? "",
           ...(source.provider === "google" ? { gmailId: source.id } : { outlookId: source.id }),
         }
       })

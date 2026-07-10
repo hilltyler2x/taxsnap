@@ -301,11 +301,12 @@ export default function Dashboard() {
     const res = await fetch("/api/receipts/import", { method: "POST", body: fd })
     setImporting(false)
     if (res.ok) {
-      const { items, truncated } = await res.json()
+      const { items } = await res.json()
       if (!items.length) { toast.error("Couldn't find any expenses in that file"); return }
       setImportPreview(items)
       setImportSelected(new Set(items.map((_: any, i: number) => i)))
-      if (truncated) toast("Only the first 60 rows were processed", { icon: "⚠️" })
+      const flagged = items.filter((i: any) => i.auditFlag).length
+      if (flagged) toast(`${flagged} item${flagged === 1 ? "" : "s"} flagged for weak audit protection — review before importing`, { icon: "⚠️", duration: 5000 })
     } else {
       const err = await res.json()
       toast.error(errMsg(err, "Import failed"))
@@ -322,11 +323,12 @@ export default function Dashboard() {
     })
     setImporting(false)
     if (res.ok) {
-      const { items, truncated } = await res.json()
+      const { items } = await res.json()
       if (!items.length) { toast.error("Couldn't find any expenses in that sheet"); return }
       setImportPreview(items)
       setImportSelected(new Set(items.map((_: any, i: number) => i)))
-      if (truncated) toast("Only the first 60 rows were processed", { icon: "⚠️" })
+      const flagged = items.filter((i: any) => i.auditFlag).length
+      if (flagged) toast(`${flagged} item${flagged === 1 ? "" : "s"} flagged for weak audit protection — review before importing`, { icon: "⚠️", duration: 5000 })
     } else {
       const err = await res.json()
       toast.error(errMsg(err, "Import failed"))
@@ -378,11 +380,12 @@ export default function Dashboard() {
     setImporting(false)
     setSheetTabs(null)
     if (res.ok) {
-      const { items, truncated } = await res.json()
+      const { items } = await res.json()
       if (!items.length) { toast.error("Couldn't find any expenses in that tab"); return }
       setImportPreview(items)
       setImportSelected(new Set(items.map((_: any, i: number) => i)))
-      if (truncated) toast("Only the first 60 rows were processed", { icon: "⚠️" })
+      const flagged = items.filter((i: any) => i.auditFlag).length
+      if (flagged) toast(`${flagged} item${flagged === 1 ? "" : "s"} flagged for weak audit protection — review before importing`, { icon: "⚠️", duration: 5000 })
     } else {
       const err = await res.json()
       toast.error(errMsg(err, "Import failed"))
@@ -648,27 +651,35 @@ export default function Dashboard() {
       {importPreview && (
         <div className="fixed inset-0 bg-black/40 z-20 flex items-end sm:items-center justify-center p-3" onClick={() => { setImportPreview(null); setImportSelected(new Set()) }}>
           <div className="w-full max-w-lg max-h-[85vh] overflow-y-auto bg-white rounded-2xl p-4" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-1">
               <p className="text-sm font-medium">Review import — {importSelected.size} of {importPreview.length} selected</p>
             </div>
+            {importPreview.some(i => i.auditFlag) && (
+              <p className="text-xs text-amber-600 mb-2">⚠ Items marked below may not hold up in an IRS audit as recorded — see the tip on each.</p>
+            )}
             <div className="space-y-2 mb-3">
               {importPreview.map((item, i) => {
                 const checked = importSelected.has(i)
                 return (
-                  <label key={i} className="flex items-center gap-3 border border-gray-100 rounded-xl p-3 cursor-pointer">
-                    <input type="checkbox" checked={checked} onChange={() => {
-                      setImportSelected(prev => {
-                        const next = new Set(prev)
-                        if (checked) next.delete(i); else next.add(i)
-                        return next
-                      })
-                    }} />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium truncate">{item.name || "(no name)"}</p>
-                      <p className="text-xs text-gray-400">{item.date} · {item.category}</p>
-                    </div>
-                    <p className="text-sm font-medium flex-shrink-0">${(item.amount ?? 0).toFixed(2)}</p>
-                  </label>
+                  <div key={i} className={`border rounded-xl p-3 ${item.auditFlag ? "border-amber-200 bg-amber-50/50" : "border-gray-100"}`}>
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input type="checkbox" checked={checked} onChange={() => {
+                        setImportSelected(prev => {
+                          const next = new Set(prev)
+                          if (checked) next.delete(i); else next.add(i)
+                          return next
+                        })
+                      }} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium truncate">{item.name || "(no name)"}{item.auditFlag && " ⚠"}</p>
+                        <p className="text-xs text-gray-400">{item.date} · {item.category} · {item.purpose}</p>
+                      </div>
+                      <p className="text-sm font-medium flex-shrink-0">${(item.amount ?? 0).toFixed(2)}</p>
+                    </label>
+                    {item.auditFlag && item.auditNote && (
+                      <p className="text-xs text-amber-700 mt-2 pl-7">{item.auditNote}</p>
+                    )}
+                  </div>
                 )
               })}
             </div>
@@ -737,6 +748,12 @@ function ScanConfirmForm({ form, note, onChange, onSave, onDiscard, onDelete, sa
         </div>
         {form.imageUrl && (
           <img src={form.imageUrl} alt="Receipt" className="w-full max-h-48 object-contain rounded-lg border border-gray-100 mb-3 bg-gray-50" />
+        )}
+        {form.auditFlag && form.auditNote && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3 flex items-start gap-2">
+            <span className="text-amber-500 text-sm">⚠</span>
+            <p className="text-xs text-amber-700">{form.auditNote}</p>
+          </div>
         )}
         {[
           { key: "name", label: "Merchant *" },
@@ -1092,12 +1109,15 @@ function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, email
                 const id = e.gmailId ?? e.outlookId
                 const done = importedEmails.has(id)
                 return (
-                  <div key={i} className="bg-white border border-gray-100 rounded-xl p-3 flex items-center gap-3">
-                    <div className="flex-1 min-w-0"><p className="text-xs font-medium truncate">{e.from}</p><p className="text-xs text-gray-400 truncate">{e.subject}</p></div>
-                    <div className="text-right flex-shrink-0">
-                      <p className="text-sm font-medium text-emerald-600">${e.amount?.toFixed(2)}</p>
-                      <button onClick={() => !done && onImportEmail(e)} disabled={done} className={`text-xs px-2.5 py-1 rounded-lg mt-1 border-none cursor-pointer ${done ? "bg-emerald-100 text-emerald-600" : "bg-emerald-500 text-white"}`}>{done ? "Saved" : "Import"}</button>
+                  <div key={i} className={`bg-white border rounded-xl p-3 ${e.auditFlag ? "border-amber-200 bg-amber-50/50" : "border-gray-100"}`}>
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 min-w-0"><p className="text-xs font-medium truncate">{e.from}{e.auditFlag && " ⚠"}</p><p className="text-xs text-gray-400 truncate">{e.subject}</p></div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-sm font-medium text-emerald-600">${e.amount?.toFixed(2)}</p>
+                        <button onClick={() => !done && onImportEmail(e)} disabled={done} className={`text-xs px-2.5 py-1 rounded-lg mt-1 border-none cursor-pointer ${done ? "bg-emerald-100 text-emerald-600" : "bg-emerald-500 text-white"}`}>{done ? "Saved" : "Import"}</button>
+                      </div>
                     </div>
+                    {e.auditFlag && e.auditNote && <p className="text-xs text-amber-700 mt-2">{e.auditNote}</p>}
                   </div>
                 )
               })}
