@@ -23,6 +23,7 @@ export async function extractExpensesFromTable(userId: string, rows: string[][])
       }],
     })
     text = message.content[0].type === "text" ? message.content[0].text : "[]"
+    console.log(`[extractExpensesFromTable] rows=${rows.length} sample=${sample.length} stopReason=${message.stop_reason} respLen=${text.length} respHead=${JSON.stringify(text.slice(0, 300))} tableHead=${JSON.stringify(tableText.slice(0, 300))}`)
   } catch (err) {
     console.error("Expense table extraction failed:", err)
     throw new Error("Could not process that data. Try again in a moment.")
