@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
   try {
     const message = await client.messages.create({
       model: "claude-sonnet-5",
-      max_tokens: 512,
+      max_tokens: 1024,
       messages: [{
         role: "user",
         content: [
@@ -34,7 +34,8 @@ export async function POST(req: NextRequest) {
         ]
       }]
     })
-    text = message.content[0].type === "text" ? message.content[0].text : ""
+    const textBlock = message.content.find((b: any) => b.type === "text") as any
+    text = textBlock?.text ?? ""
   } catch (err) {
     console.error("Anthropic receipt scan request failed:", err)
     return NextResponse.json({ error: "Receipt scanning is temporarily unavailable. Try again in a moment." }, { status: 502 })

@@ -19,13 +19,14 @@ async function extractReceipts(userId: string, items: Candidate[]) {
   try {
     const message = await client.messages.create({
       model: "claude-sonnet-5",
-      max_tokens: 1024,
+      max_tokens: 4096,
       messages: [{
         role: "user",
         content: `Below are ${items.length} emails from an inbox search for purchase-related messages. For each one that is genuinely a receipt, invoice, order confirmation, or payment confirmation, extract structured data. Skip any that are clearly not purchase-related (newsletters, notifications, social updates, etc).\n\nReturn ONLY a JSON array, no markdown, no commentary. Each item: {"index":0,"amount":0.00,"category":"Travel|Meals|Office|Software|Home|Medical|Business|Other","purpose":"one of: ${BUSINESS_PURPOSES.join(" | ")}"}\n\nPick the single closest matching purpose from that list — do not invent a new one.\n\nEmails:\n${listText}`,
       }],
     })
-    text = message.content[0].type === "text" ? message.content[0].text : "[]"
+    const textBlock = message.content.find((b: any) => b.type === "text") as any
+    text = textBlock?.text ?? "[]"
   } catch (err) {
     console.error("Email receipt extraction failed:", err)
     return []
