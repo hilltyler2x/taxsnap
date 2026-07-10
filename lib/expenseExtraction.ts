@@ -3,7 +3,26 @@ import { applyLearnedClassification } from "@/lib/learnedCategory"
 import Anthropic from "@anthropic-ai/sdk"
 
 const client = new Anthropic()
-const BATCH_SIZE = 50
+const BATCH_SIZE = 20
+
+// Salvage whatever complete {...} objects we can from a response that got
+// cut off mid-array (e.g. hit max_tokens) instead of losing the whole batch.
+function parseJsonArrayLenient(text: string): any[] {
+  const cleaned = text.replace(/```json\n?|\n?```/g, "").trim()
+  const jsonMatch = cleaned.match(/\[[\s\S]*\]/)
+  const candidate = jsonMatch ? jsonMatch[0] : cleaned
+  try {
+    return JSON.parse(candidate)
+  } catch {
+    const objMatches = candidate.match(/\{[^{}]*\}/g)
+    if (!objMatches) return []
+    const recovered: any[] = []
+    for (const m of objMatches) {
+      try { recovered.push(JSON.parse(m)) } catch { /* skip incomplete trailing fragment */ }
+    }
+    return recovered
+  }
+}
 
 function buildPrompt(tableText: string, hintLine: string) {
   return `Below is data exported from a spreadsheet someone used to track business expenses/receipts before switching to this app. The first row is likely a header, but column names and layout can vary widely — infer what each column means from context.
@@ -33,9 +52,7 @@ async function extractBatch(rows: string[][], contextHint?: string): Promise<any
     })
     const textBlock = message.content.find((b: any) => b.type === "text") as any
     const text = textBlock?.text ?? "[]"
-    const cleaned = text.replace(/```json\n?|\n?```/g, "").trim()
-    const jsonMatch = cleaned.match(/\[[\s\S]*\]/)
-    return JSON.parse(jsonMatch ? jsonMatch[0] : cleaned)
+    return parseJsonArrayLenient(text)
   } catch (err) {
     console.error("Batch expense extraction failed:", err)
     return []
