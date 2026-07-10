@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
     }
     if (!rows.length) return NextResponse.json({ error: "That tab appears to be empty." }, { status: 400 })
 
-    const { items, truncated } = await extractExpensesFromTable(user.id, rows)
+    const { items, truncated } = await extractExpensesFromTable(user.id, rows, sheetName)
     return NextResponse.json({ items, truncated })
   } catch (err: any) {
     console.error("Sheets import failed:", err)

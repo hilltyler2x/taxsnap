@@ -21,12 +21,14 @@ export async function POST(req: NextRequest) {
 
   const contentType = req.headers.get("content-type") ?? ""
   let csvText = ""
+  let contextHint: string | undefined
 
   if (contentType.includes("multipart/form-data")) {
     const formData = await req.formData()
     const file = formData.get("file") as File | null
     if (!file) return NextResponse.json({ error: "No file provided" }, { status: 400 })
     csvText = await file.text()
+    contextHint = file.name
   } else {
     const body = await req.json()
     const sheetUrl = body.sheetUrl as string | undefined
@@ -49,7 +51,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { items, truncated } = await extractExpensesFromTable(user.id, rows)
+    const { items, truncated } = await extractExpensesFromTable(user.id, rows, contextHint)
     return NextResponse.json({ items, truncated })
   } catch (err: any) {
     return NextResponse.json({ error: err.message ?? "Could not process that file." }, { status: 502 })
