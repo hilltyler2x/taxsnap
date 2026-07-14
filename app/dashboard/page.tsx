@@ -9,31 +9,6 @@ const CC: Record<string, string> = {
   Software: "#534AB7", Home: "#3B6D11", Medical: "#A32D2D", Business: "#0F766E", Other: "#888780",
 }
 
-const ADDRESS_SUGGESTIONS = [
-  { m: "Hartsfield-Jackson Airport", s: "Atlanta, GA 30320" },
-  { m: "Georgia World Congress Center", s: "Atlanta, GA 30313" },
-  { m: "Peachtree Center", s: "225 Peachtree St NE, Atlanta, GA" },
-  { m: "Buckhead Village", s: "3035 Peachtree Rd NE, Atlanta, GA" },
-  { m: "Emory University", s: "201 Dowman Dr, Atlanta, GA 30322" },
-  { m: "Marriott Marquis Atlanta", s: "265 Peachtree Center Ave, Atlanta, GA" },
-  { m: "Ponce City Market", s: "675 Ponce De Leon Ave NE, Atlanta, GA" },
-  { m: "Georgia Tech", s: "225 North Ave NW, Atlanta, GA 30332" },
-  { m: "Lenox Square", s: "3393 Peachtree Rd NE, Atlanta, GA 30326" },
-  { m: "Perimeter Mall", s: "4400 Ashford Dunwoody Rd, Atlanta, GA" },
-  { m: "Sandy Springs City Hall", s: "1 Galambos Way, Sandy Springs, GA" },
-  { m: "Mercedes-Benz Stadium", s: "1 AMB Dr NW, Atlanta, GA 30313" },
-  { m: "CNN Center", s: "190 Marietta St NW, Atlanta, GA 30303" },
-  { m: "State Farm Arena", s: "1 State Farm Dr, Atlanta, GA 30303" },
-  { m: "Truist Park", s: "755 Battery Ave SE, Atlanta, GA 30339" },
-  { m: "Office Depot Decatur", s: "1544 Church St, Decatur, GA 30030" },
-  { m: "Staples Midtown", s: "1544 Piedmont Ave NE, Atlanta, GA 30324" },
-  { m: "Cumberland Mall", s: "2860 Cumberland Mall SE, Atlanta, GA" },
-  { m: "Atlantic Station", s: "1380 Atlantic Dr NW, Atlanta, GA 30363" },
-  { m: "Duluth Town Center", s: "3167 Main St, Duluth, GA 30096" },
-  { m: "Alpharetta City Hall", s: "2 Park Plaza, Alpharetta, GA 30009" },
-  { m: "Midtown Medical Center", s: "550 Peachtree St NE, Atlanta, GA 30308" },
-  { m: "Hilton Atlanta Downtown", s: "255 Courtland St NE, Atlanta, GA 30303" },
-]
 
 const DEMO_RECEIPTS = [
   { name: "Delta Airlines", amount: 487.50, date: "2025-06-10", category: "Travel", place: "Atlanta, GA", purpose: "Business travel — conference or training", notes: "" },
@@ -422,16 +397,14 @@ export default function Dashboard() {
 
   const onDestInput = (val: string) => {
     clearTimeout(destTimer)
-    if (!val || val.length < 1) { setDestSuggestions([]); return }
-    setDestTimer(setTimeout(() => {
-      const words = val.toLowerCase().split(/\s+/).filter(Boolean)
-      setDestSuggestions(
-        ADDRESS_SUGGESTIONS.filter(a => {
-          const hay = (a.m + " " + a.s).toLowerCase()
-          return words.every(w => hay.includes(w))
-        }).slice(0, 6)
-      )
-    }, 120))
+    if (!val || val.trim().length < 3) { setDestSuggestions([]); return }
+    setDestTimer(setTimeout(async () => {
+      const res = await fetch(`/api/geocode?q=${encodeURIComponent(val)}`)
+      if (res.ok) {
+        const { results } = await res.json()
+        setDestSuggestions(results)
+      }
+    }, 350))
   }
 
   const totalDed = receipts.reduce((s, r) => s + (r.deductible ?? 0), 0) +
@@ -865,9 +838,8 @@ function MilesTab({ trips, onSave, onDestInput, suggestions, onSelectDest }: any
             <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl overflow-hidden z-10 shadow-sm">
               {suggestions.map((s: any, i: number) => (
                 <button key={i} className="w-full text-left px-3 py-2.5 hover:bg-gray-50 border-b border-gray-50 last:border-0 block"
-                  onMouseDown={() => { setForm({ ...form, destination: s.m + ", " + s.s }); onSelectDest() }}>
-                  <p className="text-xs font-medium">📍 {s.m}</p>
-                  <p className="text-xs text-gray-400">{s.s}</p>
+                  onMouseDown={() => { setForm({ ...form, destination: s.label }); onSelectDest() }}>
+                  <p className="text-xs font-medium">📍 {s.label}</p>
                 </button>
               ))}
             </div>
