@@ -63,6 +63,8 @@ export default function Dashboard() {
   const [editForm, setEditForm] = useState<any>(null)
   const [editingTrip, setEditingTrip] = useState<any>(null)
   const [editTripForm, setEditTripForm] = useState<any>(null)
+  const [emailDraft, setEmailDraft] = useState<any>(null)
+  const [emailDraftForm, setEmailDraftForm] = useState<any>(null)
   const [importPreview, setImportPreview] = useState<any[] | null>(null)
   const [importSelected, setImportSelected] = useState<Set<number>>(new Set())
   const [importing, setImporting] = useState(false)
@@ -304,20 +306,38 @@ export default function Dashboard() {
     }
   }
 
-  const importEmail = async (email: any) => {
+  const startEmailImport = (email: any) => {
+    setEmailDraft(email)
+    setEmailDraftForm({
+      name: email.from,
+      amount: email.amount || undefined,
+      date: email.date ? new Date(email.date).toISOString().split("T")[0] : todayLocalISO(),
+      category: email.category,
+      purpose: email.purpose,
+      place: "",
+      notes: email.notes ?? email.subject,
+      auditFlag: email.auditFlag,
+      auditNote: email.auditNote,
+    })
+  }
+
+  const confirmEmailImport = async () => {
+    if (!emailDraft || !emailDraftForm) return
     const res = await fetch("/api/receipts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: email.from, amount: email.amount, date: email.date,
-        category: email.category, purpose: email.purpose ?? email.subject, source: "email",
-      }),
+      body: JSON.stringify({ ...emailDraftForm, source: "email" }),
     })
     if (res.ok) {
-      const id = email.gmailId ?? email.outlookId
+      const id = emailDraft.gmailId ?? emailDraft.outlookId
       setImportedEmails(prev => new Set(Array.from(prev).concat(id)))
       toast.success("Imported!")
+      setEmailDraft(null)
+      setEmailDraftForm(null)
       fetchReceipts()
+    } else {
+      const err = await res.json()
+      toast.error(errMsg(err, "Failed to import"))
     }
   }
 
@@ -638,7 +658,7 @@ export default function Dashboard() {
             emailConnected={emailConnected}
             importedEmails={importedEmails}
             onFetchEmails={fetchEmails}
-            onImportEmail={importEmail}
+            onImportEmail={startEmailImport}
             onDisconnectEmail={disconnectEmail}
             onCheckout={startCheckout}
             onCsvFile={handleCsvImport}
@@ -685,6 +705,22 @@ export default function Dashboard() {
               onDestInput={onDestInput}
               suggestions={destSuggestions}
               onSelectDest={() => setDestSuggestions([])}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Email import review modal */}
+      {emailDraft && emailDraftForm && (
+        <div className="fixed inset-0 bg-black/40 z-20 flex items-end sm:items-center justify-center p-3" onClick={() => { setEmailDraft(null); setEmailDraftForm(null) }}>
+          <div className="w-full max-w-lg max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <ScanConfirmForm
+              form={emailDraftForm}
+              note="Found in inbox — review and confirm"
+              onChange={setEmailDraftForm}
+              onSave={confirmEmailImport}
+              onDiscard={() => { setEmailDraft(null); setEmailDraftForm(null) }}
+              saveLabel="✓ Import"
             />
           </div>
         </div>
