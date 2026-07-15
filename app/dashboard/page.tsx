@@ -9,6 +9,20 @@ const CC: Record<string, string> = {
   Software: "#534AB7", Home: "#3B6D11", Medical: "#A32D2D", Business: "#0F766E", Other: "#888780",
 }
 
+// Stored dates are UTC-midnight timestamps for a calendar day (e.g. "2026-07-15T00:00:00.000Z").
+// toLocaleDateString() converts to the browser's local timezone first, which shifts the displayed
+// day backward for anyone west of UTC — force UTC so the calendar date shown matches what was saved.
+function formatDateUTC(dateStr: string, opts?: Intl.DateTimeFormatOptions) {
+  return new Date(dateStr).toLocaleDateString("en-US", { ...opts, timeZone: "UTC" })
+}
+
+// The mirror-image bug: computing "today" via toISOString() converts the current moment to UTC
+// first, which rolls over to tomorrow's date once local time crosses UTC midnight (e.g. 8pm ET).
+function todayLocalISO() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
 
 const DEMO_RECEIPTS = [
   { name: "Delta Airlines", amount: 487.50, date: "2025-06-10", category: "Travel", place: "Atlanta, GA", purpose: "Business travel — conference or training", notes: "" },
@@ -681,7 +695,7 @@ export default function Dashboard() {
 
 function ReceiptCard({ r, onClick }: { r: any; onClick?: () => void }) {
   const col = CC[r.category] ?? "#888"
-  const d = new Date(r.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+  const d = formatDateUTC(r.date, { month: "short", day: "numeric" })
   const icon: Record<string, string> = { Travel: "✈", Meals: "🍽", Office: "📦", Software: "💻", Home: "🏠", Medical: "⚕", Business: "💼", Other: "📎" }
   return (
     <div onClick={onClick} className="bg-white border border-gray-100 rounded-xl p-3 flex items-center gap-3 cursor-pointer hover:border-gray-300 transition-colors">
@@ -809,7 +823,7 @@ function LockScreen({ icon, title, sub, onUpgrade }: any) {
 }
 
 function MilesTab({ trips, onSave, onDestInput, suggestions, onSelectDest }: any) {
-  const [form, setForm] = useState({ purpose: "", destination: "", odoStart: "", odoEnd: "", date: new Date().toISOString().split("T")[0] })
+  const [form, setForm] = useState({ purpose: "", destination: "", odoStart: "", odoEnd: "", date: todayLocalISO() })
   const miles = parseInt(form.odoEnd) - parseInt(form.odoStart)
   const ded = isNaN(miles) || miles <= 0 ? 0 : miles * IRS_MILEAGE_RATE
   const totalMiles = trips.reduce((s: number, t: any) => s + t.miles, 0)
@@ -851,7 +865,7 @@ function MilesTab({ trips, onSave, onDestInput, suggestions, onSelectDest }: any
         </div>
         {miles > 0 && <p className="text-xs text-blue-600 font-medium">{miles} miles · ${ded.toFixed(2)} deductible</p>}
         <div><label className="text-xs text-gray-500 block mb-1">Date *</label><input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2" /></div>
-        <button onClick={() => { if (!form.purpose || !form.destination || !form.odoStart || !form.odoEnd || miles <= 0) return; onSave({ ...form, odoStart: parseInt(form.odoStart), odoEnd: parseInt(form.odoEnd) }); setForm({ purpose: "", destination: "", odoStart: "", odoEnd: "", date: new Date().toISOString().split("T")[0] }) }}
+        <button onClick={() => { if (!form.purpose || !form.destination || !form.odoStart || !form.odoEnd || miles <= 0) return; onSave({ ...form, odoStart: parseInt(form.odoStart), odoEnd: parseInt(form.odoEnd) }); setForm({ purpose: "", destination: "", odoStart: "", odoEnd: "", date: todayLocalISO() }) }}
           className="w-full bg-emerald-500 text-white py-2.5 rounded-xl text-sm font-medium">+ Add to log</button>
       </div>
 
@@ -861,7 +875,7 @@ function MilesTab({ trips, onSave, onDestInput, suggestions, onSelectDest }: any
           <div key={t.id} className="bg-white border border-gray-100 rounded-xl p-3">
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center text-sm flex-shrink-0">🚗</div>
-              <div className="flex-1 min-w-0"><p className="text-xs font-medium truncate">{t.purpose}</p><p className="text-xs text-gray-400">{new Date(t.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</p></div>
+              <div className="flex-1 min-w-0"><p className="text-xs font-medium truncate">{t.purpose}</p><p className="text-xs text-gray-400">{formatDateUTC(t.date, { month: "short", day: "numeric" })}</p></div>
               <div className="text-right"><p className="text-sm font-medium text-blue-600">{t.miles} mi</p><p className="text-xs text-emerald-600">${t.deductible?.toFixed(2)}</p></div>
             </div>
             <p className="text-xs text-gray-400 mt-1.5 pl-9">📍 {t.destination} · 🔢 {t.odoStart?.toLocaleString()} → {t.odoEnd?.toLocaleString()}</p>
@@ -920,7 +934,7 @@ function TaxesTab({ receipts, trips, isPro, onUpgrade }: any) {
       startY: y + 4,
       head: [["Date", "Merchant", "Category", "Purpose", "Amount", "Deductible"]],
       body: receipts.map((r: any) => [
-        new Date(r.date).toLocaleDateString(),
+        formatDateUTC(r.date),
         r.name,
         r.category,
         r.purpose ?? "",
@@ -940,7 +954,7 @@ function TaxesTab({ receipts, trips, isPro, onUpgrade }: any) {
         startY: y + 4,
         head: [["Date", "Destination", "Purpose", "Miles", "Deductible"]],
         body: trips.map((t: any) => [
-          new Date(t.date).toLocaleDateString(),
+          formatDateUTC(t.date),
           t.destination,
           t.purpose,
           t.miles,
