@@ -61,6 +61,8 @@ export default function Dashboard() {
   const [scanForm, setScanForm] = useState<any>(null)
   const [editingReceipt, setEditingReceipt] = useState<any>(null)
   const [editForm, setEditForm] = useState<any>(null)
+  const [editingTrip, setEditingTrip] = useState<any>(null)
+  const [editTripForm, setEditTripForm] = useState<any>(null)
   const [importPreview, setImportPreview] = useState<any[] | null>(null)
   const [importSelected, setImportSelected] = useState<Set<number>>(new Set())
   const [importing, setImporting] = useState(false)
@@ -264,6 +266,42 @@ export default function Dashboard() {
     })
     if (res.ok) { toast.success("Trip logged!"); fetchTrips() }
     else { const e = await res.json(); toast.error(errMsg(e, "Failed")) }
+  }
+
+  const openEditTrip = (t: any) => {
+    setEditingTrip(t)
+    setEditTripForm({ ...t, date: new Date(t.date).toISOString().split("T")[0], odoStart: String(t.odoStart), odoEnd: String(t.odoEnd) })
+  }
+
+  const saveTripEdit = async () => {
+    if (!editTripForm || !editingTrip) return
+    const res = await fetch(`/api/trips/${editingTrip.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...editTripForm, odoStart: parseInt(editTripForm.odoStart), odoEnd: parseInt(editTripForm.odoEnd) }),
+    })
+    if (res.ok) {
+      toast.success("Trip updated!")
+      setEditingTrip(null)
+      setEditTripForm(null)
+      fetchTrips()
+    } else {
+      const err = await res.json()
+      toast.error(errMsg(err, "Failed to update"))
+    }
+  }
+
+  const deleteTripEdit = async () => {
+    if (!editingTrip) return
+    const res = await fetch(`/api/trips/${editingTrip.id}`, { method: "DELETE" })
+    if (res.ok) {
+      toast.success("Trip deleted")
+      setEditingTrip(null)
+      setEditTripForm(null)
+      fetchTrips()
+    } else {
+      toast.error("Failed to delete")
+    }
   }
 
   const importEmail = async (email: any) => {
@@ -579,7 +617,7 @@ export default function Dashboard() {
         {tab === "miles" && (
           !isPro
             ? <LockScreen icon="🚗" title="Mileage tracking is Pro" sub="Log IRS-compliant trips with destination and odometer readings. Upgrade to Pro for $5/month." onUpgrade={() => setTab("account")} />
-            : <MilesTab trips={trips} onSave={saveTrip} onDestInput={onDestInput} suggestions={destSuggestions} onSelectDest={() => setDestSuggestions([])} />
+            : <MilesTab trips={trips} onSave={saveTrip} onDestInput={onDestInput} suggestions={destSuggestions} onSelectDest={() => setDestSuggestions([])} onEditTrip={openEditTrip} />
         )}
 
         {/* TAXES */}
@@ -629,6 +667,24 @@ export default function Dashboard() {
               onDiscard={() => { setEditingReceipt(null); setEditForm(null) }}
               onDelete={deleteReceiptEdit}
               saveLabel="✓ Save changes"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Edit trip modal */}
+      {editingTrip && editTripForm && (
+        <div className="fixed inset-0 bg-black/40 z-20 flex items-end sm:items-center justify-center p-3" onClick={() => { setEditingTrip(null); setEditTripForm(null) }}>
+          <div className="w-full max-w-lg max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <TripEditForm
+              form={editTripForm}
+              onChange={setEditTripForm}
+              onSave={saveTripEdit}
+              onDiscard={() => { setEditingTrip(null); setEditTripForm(null) }}
+              onDelete={deleteTripEdit}
+              onDestInput={onDestInput}
+              suggestions={destSuggestions}
+              onSelectDest={() => setDestSuggestions([])}
             />
           </div>
         </div>
@@ -822,7 +878,7 @@ function LockScreen({ icon, title, sub, onUpgrade }: any) {
   )
 }
 
-function MilesTab({ trips, onSave, onDestInput, suggestions, onSelectDest }: any) {
+function MilesTab({ trips, onSave, onDestInput, suggestions, onSelectDest, onEditTrip }: any) {
   const [form, setForm] = useState({ purpose: "", destination: "", odoStart: "", odoEnd: "", date: todayLocalISO() })
   const miles = parseInt(form.odoEnd) - parseInt(form.odoStart)
   const ded = isNaN(miles) || miles <= 0 ? 0 : miles * IRS_MILEAGE_RATE
@@ -872,7 +928,7 @@ function MilesTab({ trips, onSave, onDestInput, suggestions, onSelectDest }: any
       <p className="text-sm font-medium mb-2">Trip log</p>
       <div className="space-y-2">
         {trips.map((t: any) => (
-          <div key={t.id} className="bg-white border border-gray-100 rounded-xl p-3">
+          <div key={t.id} onClick={() => onEditTrip(t)} className="bg-white border border-gray-100 rounded-xl p-3 cursor-pointer hover:border-gray-300 transition-colors">
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center text-sm flex-shrink-0">🚗</div>
               <div className="flex-1 min-w-0"><p className="text-xs font-medium truncate">{t.purpose}</p><p className="text-xs text-gray-400">{formatDateUTC(t.date, { month: "short", day: "numeric" })}</p></div>
@@ -883,6 +939,56 @@ function MilesTab({ trips, onSave, onDestInput, suggestions, onSelectDest }: any
         ))}
         {!trips.length && <p className="text-xs text-gray-400 text-center py-4">No trips logged yet</p>}
       </div>
+    </div>
+  )
+}
+
+function TripEditForm({ form, onChange, onSave, onDiscard, onDelete, onDestInput, suggestions, onSelectDest }: any) {
+  const odoStart = parseInt(form.odoStart)
+  const odoEnd = parseInt(form.odoEnd)
+  const miles = odoEnd - odoStart
+  const ded = isNaN(miles) || miles <= 0 ? 0 : miles * IRS_MILEAGE_RATE
+
+  return (
+    <div className="bg-white border-2 border-emerald-400 rounded-2xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs font-medium text-emerald-700">✦ Edit trip</p>
+      </div>
+      <div className="space-y-3">
+        <div>
+          <label className="text-xs text-gray-500 block mb-1">Business purpose *</label>
+          <select value={form.purpose} onChange={(e: any) => onChange({ ...form, purpose: e.target.value })} className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white">
+            <option value="" disabled>Select a reason...</option>
+            {BUSINESS_PURPOSES.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+        <div className="relative">
+          <label className="text-xs text-gray-500 block mb-1">Destination *</label>
+          <input value={form.destination} onChange={(e: any) => { onChange({ ...form, destination: e.target.value }); onDestInput(e.target.value) }}
+            placeholder="Start typing an address..." className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2" autoComplete="off" />
+          {suggestions.length > 0 && (
+            <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl overflow-hidden z-10 shadow-sm">
+              {suggestions.map((s: any, i: number) => (
+                <button key={i} className="w-full text-left px-3 py-2.5 hover:bg-gray-50 border-b border-gray-50 last:border-0 block"
+                  onMouseDown={() => { onChange({ ...form, destination: s.label }); onSelectDest() }}>
+                  <p className="text-xs font-medium">📍 {s.label}</p>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div><label className="text-xs text-gray-500 block mb-1">Odo start *</label><input type="number" value={form.odoStart} onChange={(e: any) => onChange({ ...form, odoStart: e.target.value })} className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2" /></div>
+          <div><label className="text-xs text-gray-500 block mb-1">Odo end *</label><input type="number" value={form.odoEnd} onChange={(e: any) => onChange({ ...form, odoEnd: e.target.value })} className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2" /></div>
+        </div>
+        {miles > 0 && <p className="text-xs text-blue-600 font-medium">{miles} miles · ${ded.toFixed(2)} deductible</p>}
+        <div><label className="text-xs text-gray-500 block mb-1">Date *</label><input type="date" value={form.date} onChange={(e: any) => onChange({ ...form, date: e.target.value })} className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2" /></div>
+      </div>
+      <div className="flex gap-2 mt-3">
+        <button onClick={onDiscard} className="flex-1 py-2 rounded-xl border border-gray-200 text-xs text-gray-500">Discard</button>
+        <button onClick={onSave} className="flex-1 py-2 rounded-xl bg-emerald-500 text-white text-xs font-medium">✓ Save changes</button>
+      </div>
+      <button onClick={onDelete} className="w-full mt-2 py-2 rounded-xl border border-red-200 text-xs text-red-600">Delete trip</button>
     </div>
   )
 }
