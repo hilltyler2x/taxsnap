@@ -24,11 +24,12 @@ function todayLocalISO() {
 }
 
 
+const DEMO_YEAR = new Date().getFullYear()
 const DEMO_RECEIPTS = [
-  { name: "Delta Airlines", amount: 487.50, date: "2025-06-10", category: "Travel", place: "Atlanta, GA", purpose: "Business travel — conference or training", notes: "" },
-  { name: "Nobu Restaurant", amount: 143.20, date: "2025-06-12", category: "Meals", place: "New York, NY", purpose: "Business meal — client or prospect", notes: "" },
-  { name: "Microsoft 365", amount: 99.99, date: "2025-06-01", category: "Software", place: "Online", purpose: "Software or subscription for business use", notes: "" },
-  { name: "FedEx Shipping", amount: 28.40, date: "2025-06-08", category: "Office", place: "Decatur, GA", purpose: "Shipping and postage", notes: "" },
+  { name: "Delta Airlines", amount: 487.50, date: `${DEMO_YEAR}-06-10`, category: "Travel", place: "Atlanta, GA", purpose: "Business travel — conference or training", notes: "" },
+  { name: "Nobu Restaurant", amount: 143.20, date: `${DEMO_YEAR}-06-12`, category: "Meals", place: "New York, NY", purpose: "Business meal — client or prospect", notes: "" },
+  { name: "Microsoft 365", amount: 99.99, date: `${DEMO_YEAR}-06-01`, category: "Software", place: "Online", purpose: "Software or subscription for business use", notes: "" },
+  { name: "FedEx Shipping", amount: 28.40, date: `${DEMO_YEAR}-06-08`, category: "Office", place: "Decatur, GA", purpose: "Shipping and postage", notes: "" },
 ]
 
 type Tab = "home" | "receipts" | "miles" | "taxes" | "account"
@@ -923,7 +924,7 @@ function MilesTab({ trips, onSave, onDestInput, suggestions, onSelectDest, onEdi
   return (
     <div>
       <div className="grid grid-cols-2 gap-2 mb-3">
-        <div className="bg-blue-50 rounded-xl p-3"><p className="text-xs text-blue-600 mb-1">Total miles</p><p className="text-xl font-medium text-blue-900">{totalMiles}</p><p className="text-xs text-blue-500">2025 YTD</p></div>
+        <div className="bg-blue-50 rounded-xl p-3"><p className="text-xs text-blue-600 mb-1">Total miles</p><p className="text-xl font-medium text-blue-900">{totalMiles}</p><p className="text-xs text-blue-500">{new Date().getFullYear()} YTD</p></div>
         <div className="bg-blue-50 rounded-xl p-3"><p className="text-xs text-blue-600 mb-1">IRS deduction</p><p className="text-xl font-medium text-blue-900">${Math.round(totalMiles * IRS_MILEAGE_RATE)}</p><p className="text-xs text-blue-500">at $0.67/mile</p></div>
       </div>
 
@@ -1041,7 +1042,7 @@ function TaxesTab({ receipts, trips, isPro, onUpgrade }: any) {
     const res = await fetch("/api/export?format=csv")
     if (!res.ok) { const e = await res.json(); alert(errMsg(e, "Export failed")); return }
     const blob = await res.blob()
-    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "taxsnap_irs_2025.csv"; a.click()
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `taxsnap_irs_${new Date().getFullYear()}.csv`; a.click()
   }
 
   const handleExportPdf = async () => {
@@ -1118,7 +1119,7 @@ function TaxesTab({ receipts, trips, isPro, onUpgrade }: any) {
         <div className="bg-gray-100 rounded-xl p-3"><p className="text-xs text-gray-500 mb-1">Est. savings</p><p className="text-xl font-medium">${Math.round(total * 0.22).toLocaleString()}</p><p className="text-xs text-gray-400">22% bracket</p></div>
       </div>
       <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden mb-3">
-        <div className="px-4 py-3 border-b border-gray-100 flex justify-between"><p className="text-sm font-medium">Breakdown</p><p className="text-xs text-gray-400">2025</p></div>
+        <div className="px-4 py-3 border-b border-gray-100 flex justify-between"><p className="text-sm font-medium">Breakdown</p><p className="text-xs text-gray-400">{new Date().getFullYear()}</p></div>
         {Object.entries(bycat).sort((a, b) => b[1] - a[1]).map(([cat, amt]) => (
           <div key={cat} className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-50 last:border-0">
             <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: CC[cat] ?? "#888" }} />
