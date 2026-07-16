@@ -16,12 +16,12 @@ export async function GET(req: NextRequest) {
     prisma.trip.findMany({ where: { userId, date: { gte: new Date(`${year}-01-01`), lte: new Date(`${year}-12-31`) } }, orderBy: { date: "asc" } }),
   ])
 
-  const rows: string[][] = [["Type","Date","Vendor","Place","Purpose","Category","Amount","Deductible","Attendees","Odo Start","Odo End"]]
+  const rows: string[][] = [["Type","Date","Vendor","Place","Purpose","Category","Amount","Deductible","Notes","Attendees","Odo Start","Odo End","Audit Flag","Audit Note"]]
   receipts.forEach(r => {
     const att = Array.isArray(r.attendees) ? (r.attendees as any[]).map((a:any) => `${a.name} (${a.relationship})`).join("; ") : ""
-    rows.push(["Receipt", r.date.toISOString().split("T")[0], r.name, r.place ?? "", r.purpose ?? "", r.category, r.amount.toFixed(2), (r.deductible ?? 0).toFixed(2), att, "", ""])
+    rows.push(["Receipt", r.date.toISOString().split("T")[0], r.name, r.place ?? "", r.purpose ?? "", r.category, r.amount.toFixed(2), (r.deductible ?? 0).toFixed(2), r.notes ?? "", att, "", "", r.auditFlag ? "Yes" : "No", r.auditNote ?? ""])
   })
-  trips.forEach(t => rows.push(["Mileage", t.date.toISOString().split("T")[0], "", t.destination, t.purpose, "Travel", (t.miles * IRS_MILEAGE_RATE).toFixed(2), t.deductible.toFixed(2), "", t.odoStart.toString(), t.odoEnd.toString()]))
+  trips.forEach(t => rows.push(["Mileage", t.date.toISOString().split("T")[0], "", t.destination, t.purpose, "Travel", (t.miles * IRS_MILEAGE_RATE).toFixed(2), t.deductible.toFixed(2), "", "", t.odoStart.toString(), t.odoEnd.toString(), "No", ""]))
 
   const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n")
   return new NextResponse(csv, { headers: { "Content-Type": "text/csv", "Content-Disposition": `attachment; filename="taxsnap_${year}.csv"` } })

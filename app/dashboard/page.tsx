@@ -443,6 +443,7 @@ export default function Dashboard() {
   const confirmImport = async () => {
     if (!importPreview) return
     let count = 0
+    let dupes = 0
     for (const i of Array.from(importSelected)) {
       const item = importPreview[i]
       if (!item) continue
@@ -452,8 +453,10 @@ export default function Dashboard() {
         body: JSON.stringify({ ...item, source: "import" }),
       })
       if (res.ok) count++
+      else if (res.status === 409) dupes++
     }
-    toast.success(`Imported ${count} receipt${count === 1 ? "" : "s"}`)
+    const dupeSuffix = dupes ? `, skipped ${dupes} duplicate${dupes === 1 ? "" : "s"} already on file` : ""
+    toast.success(`Imported ${count} receipt${count === 1 ? "" : "s"}${dupeSuffix}`)
     setImportPreview(null)
     setImportSelected(new Set())
     fetchReceipts()
@@ -800,7 +803,7 @@ function ReceiptCard({ r, onClick }: { r: any; onClick?: () => void }) {
         </div>
       )}
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium truncate">{r.name}</p>
+        <p className="text-sm font-medium truncate">{r.name}{r.auditFlag && <span className="text-amber-500"> ⚠</span>}</p>
         <p className="text-xs text-gray-400 truncate">{d}{r.purpose ? " · " + r.purpose : ""}</p>
       </div>
       <div className="text-right flex-shrink-0">
@@ -1075,7 +1078,7 @@ function TaxesTab({ receipts, trips, isPro, onUpgrade }: any) {
     doc.text("Receipts", 14, y)
     doc.autoTable({
       startY: y + 4,
-      head: [["Date", "Merchant", "Category", "Purpose", "Amount", "Deductible"]],
+      head: [["Date", "Merchant", "Category", "Purpose", "Amount", "Deductible", "Audit"]],
       body: receipts.map((r: any) => [
         formatDateUTC(r.date),
         r.name,
@@ -1083,11 +1086,29 @@ function TaxesTab({ receipts, trips, isPro, onUpgrade }: any) {
         r.purpose ?? "",
         `$${r.amount.toFixed(2)}`,
         `$${(r.deductible ?? 0).toFixed(2)}`,
+        r.auditFlag ? "⚠" : "",
       ]),
       theme: "striped",
       headStyles: { fillColor: [16, 122, 87] },
       styles: { fontSize: 8 },
     })
+
+    const flagged = receipts.filter((r: any) => r.auditFlag && r.auditNote)
+    if (flagged.length) {
+      y = doc.lastAutoTable.finalY + 10
+      doc.setFontSize(12)
+      doc.setTextColor(180, 100, 0)
+      doc.text("Audit risk — review before filing", 14, y)
+      doc.setTextColor(0)
+      doc.autoTable({
+        startY: y + 4,
+        head: [["Merchant", "Note"]],
+        body: flagged.map((r: any) => [r.name, r.auditNote]),
+        theme: "striped",
+        headStyles: { fillColor: [180, 100, 0] },
+        styles: { fontSize: 8 },
+      })
+    }
 
     if (trips.length) {
       y = doc.lastAutoTable.finalY + 10

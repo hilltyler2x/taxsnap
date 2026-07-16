@@ -16,6 +16,8 @@ const ReceiptSchema = z.object({
   attendees: z.any().optional(),
   source: z.string().nullable().optional(),
   imageUrl: z.string().nullable().optional(),
+  auditFlag: z.boolean().nullable().optional(),
+  auditNote: z.string().nullable().optional(),
 })
 
 export async function GET(req: NextRequest) {
@@ -47,6 +49,18 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
 
   const data = parsed.data
+  const existingDupe = await prisma.receipt.findFirst({
+    where: {
+      userId,
+      amount: data.amount,
+      date: new Date(data.date),
+      name: { equals: data.name.trim(), mode: "insensitive" },
+    },
+  })
+  if (existingDupe) {
+    return NextResponse.json({ error: "Duplicate receipt — an identical entry (same name, date, and amount) already exists." }, { status: 409 })
+  }
+
   const receipt = await prisma.receipt.create({
     data: {
       userId,
@@ -62,6 +76,8 @@ export async function POST(req: NextRequest) {
       attendees: data.attendees ?? [],
       source: data.source ?? "manual",
       imageUrl: data.imageUrl,
+      auditFlag: data.auditFlag ?? false,
+      auditNote: data.auditNote,
     },
   })
   return NextResponse.json({ receipt })

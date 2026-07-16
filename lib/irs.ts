@@ -1,4 +1,4 @@
-export const IRS_MILEAGE_RATE = 0.67 // 2025 rate per mile
+export const IRS_MILEAGE_RATE = 0.70 // 2025 rate per mile
 
 export const DEDUCT_RATES: Record<string, number> = {
   Travel: 1.0,
@@ -6,7 +6,10 @@ export const DEDUCT_RATES: Record<string, number> = {
   Office: 1.0,
   Software: 1.0,
   Home: 0, // calculated from sq ft
-  Medical: 0.5,
+  // Personal medical costs are a Schedule A itemized deduction (7.5%-of-AGI floor), not
+  // a Schedule C business expense — self-employed health insurance premiums get their own
+  // above-the-line deduction instead. Neither is "50% of a receipt," so don't credit it here.
+  Medical: 0,
   Business: 1.0,
   Other: 0.5,
 }

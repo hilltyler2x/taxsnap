@@ -14,6 +14,8 @@ const ReceiptUpdateSchema = z.object({
   notes: z.string().nullable().optional(),
   homePct: z.number().nullable().optional(),
   attendees: z.any().optional(),
+  auditFlag: z.boolean().nullable().optional(),
+  auditNote: z.string().nullable().optional(),
 })
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
@@ -41,6 +43,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       homePct: data.homePct,
       deductible: calcDeductible(data.amount, data.category, data.homePct),
       attendees: data.attendees ?? existing.attendees ?? [],
+      auditFlag: data.auditFlag ?? existing.auditFlag,
+      auditNote: data.auditNote ?? existing.auditNote,
     },
   })
   return NextResponse.json({ receipt })
