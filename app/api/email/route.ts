@@ -22,7 +22,9 @@ async function extractReceipts(userId: string, items: Candidate[]) {
   let text = ""
   try {
     const message = await client.messages.create({
-      model: "claude-sonnet-5",
+      // Short-text classification, not vision/OCR — Haiku is well suited and
+      // meaningfully faster here than Sonnet (measured ~25s vs low single digits).
+      model: "claude-haiku-4-5-20251001",
       max_tokens: 4096,
       messages: [{
         role: "user",
