@@ -1,5 +1,5 @@
 import { BUSINESS_PURPOSES } from "@/lib/irs"
-import { applyLearnedClassification } from "@/lib/learnedCategory"
+import { applyLearnedClassificationBatch } from "@/lib/learnedCategory"
 import Anthropic from "@anthropic-ai/sdk"
 
 const client = new Anthropic()
@@ -72,6 +72,6 @@ export async function extractExpensesFromTable(userId: string, rows: string[][],
   const results = await Promise.all(batches.map(batch => extractBatch(batch, contextHint)))
   const allParsed = results.flat()
 
-  const items = await Promise.all(allParsed.map(item => applyLearnedClassification(userId, item)))
+  const items = await applyLearnedClassificationBatch(userId, allParsed)
   return { items, truncated: false }
 }

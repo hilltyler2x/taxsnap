@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma"
 import { listGmailReceiptCandidates } from "@/lib/googleOAuth"
 import { listOutlookReceiptCandidates, refreshMicrosoftToken } from "@/lib/microsoftOAuth"
 import { BUSINESS_PURPOSES } from "@/lib/irs"
-import { applyLearnedClassification } from "@/lib/learnedCategory"
+import { applyLearnedClassificationBatch } from "@/lib/learnedCategory"
 import Anthropic from "@anthropic-ai/sdk"
 
 const client = new Anthropic()
@@ -56,7 +56,7 @@ async function extractReceipts(userId: string, items: Candidate[]) {
           ...(source.provider === "google" ? { gmailId: source.id } : { outlookId: source.id }),
         }
       })
-    return Promise.all(results.map(r => applyLearnedClassification(userId, { ...r, name: r.from })))
+    return applyLearnedClassificationBatch(userId, results.map(r => ({ ...r, name: r.from })))
   } catch (err) {
     console.error("Could not parse email extraction response:", text)
     return []

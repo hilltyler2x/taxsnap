@@ -5,21 +5,20 @@ function normalize(name: string) {
 }
 
 export type LearnedClassification = { category: string; purpose: string | null }
+type HistoryRow = { name: string; category: string; purpose: string | null }
 
-// If the user has already categorized this merchant before (even on a
-// different day, different receipt), reuse that same category/purpose
-// instead of letting the AI guess fresh every time.
-export async function getLearnedClassification(userId: string, merchantName: string): Promise<LearnedClassification | null> {
-  if (!merchantName) return null
-  const norm = normalize(merchantName)
-  if (!norm) return null
-
-  const receipts = await prisma.receipt.findMany({
+async function loadHistory(userId: string): Promise<HistoryRow[]> {
+  return prisma.receipt.findMany({
     where: { userId },
     select: { name: true, category: true, purpose: true },
     orderBy: { createdAt: "desc" },
     take: 300,
   })
+}
+
+function matchHistory(receipts: HistoryRow[], merchantName: string): LearnedClassification | null {
+  const norm = normalize(merchantName)
+  if (!norm) return null
 
   const matches = receipts.filter(r => {
     const rn = normalize(r.name)
@@ -39,6 +38,15 @@ export async function getLearnedClassification(userId: string, merchantName: str
   return best ? { category: best.category, purpose: best.purpose } : null
 }
 
+// If the user has already categorized this merchant before (even on a
+// different day, different receipt), reuse that same category/purpose
+// instead of letting the AI guess fresh every time.
+export async function getLearnedClassification(userId: string, merchantName: string): Promise<LearnedClassification | null> {
+  if (!merchantName) return null
+  const receipts = await loadHistory(userId)
+  return matchHistory(receipts, merchantName)
+}
+
 export async function applyLearnedClassification<T extends { name?: string; category?: string; purpose?: string }>(
   userId: string,
   item: T
@@ -47,4 +55,19 @@ export async function applyLearnedClassification<T extends { name?: string; cate
   const learned = await getLearnedClassification(userId, item.name)
   if (!learned) return item
   return { ...item, category: learned.category, purpose: learned.purpose ?? item.purpose }
+}
+
+// Same as applyLearnedClassification but fetches the user's history once and
+// reuses it for every item, instead of firing one 300-row query per item.
+export async function applyLearnedClassificationBatch<T extends { name?: string; category?: string; purpose?: string }>(
+  userId: string,
+  items: T[]
+): Promise<T[]> {
+  const receipts = await loadHistory(userId)
+  return items.map(item => {
+    if (!item.name) return item
+    const learned = matchHistory(receipts, item.name)
+    if (!learned) return item
+    return { ...item, category: learned.category, purpose: learned.purpose ?? item.purpose }
+  })
 }
