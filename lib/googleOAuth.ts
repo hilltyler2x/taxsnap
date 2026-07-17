@@ -1,4 +1,5 @@
 import { google } from "googleapis"
+import { stripHtml, EMAIL_BODY_MAX_CHARS } from "@/lib/emailText"
 
 export const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
@@ -25,6 +26,34 @@ export function getGoogleAuthUrl(state: string) {
 
 export type EmailCandidate = { id: string; from: string; subject: string; date: string; snippet: string }
 
+function decodeGmailBase64(data: string): string {
+  return Buffer.from(data.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf-8")
+}
+
+// Gmail's plain snippet is too short to contain the actual charged amount for
+// most receipt emails, which render it further down in the HTML body — so
+// walk the MIME tree for the real body instead (text/plain preferred, HTML as fallback).
+function findGmailBodyText(payload: any): string {
+  if (!payload) return ""
+  if (payload.body?.data && (payload.mimeType === "text/plain" || !payload.parts)) {
+    const text = decodeGmailBase64(payload.body.data)
+    return payload.mimeType === "text/html" ? stripHtml(text) : text
+  }
+  if (payload.parts) {
+    const plain = payload.parts.find((p: any) => p.mimeType === "text/plain" && p.body?.data)
+    if (plain) return decodeGmailBase64(plain.body.data)
+    for (const part of payload.parts) {
+      if (part.mimeType?.startsWith("multipart/")) {
+        const nested = findGmailBodyText(part)
+        if (nested) return nested
+      }
+    }
+    const html = payload.parts.find((p: any) => p.mimeType === "text/html" && p.body?.data)
+    if (html) return stripHtml(decodeGmailBase64(html.body.data))
+  }
+  return ""
+}
+
 export async function listGmailReceiptCandidates(token: { accessToken: string; refreshToken: string | null }) {
   const authClient = getGoogleOAuthClient()
   authClient.setCredentials({ access_token: token.accessToken, refresh_token: token.refreshToken ?? undefined })
@@ -40,10 +69,11 @@ export async function listGmailReceiptCandidates(token: { accessToken: string; r
   })
 
   const items = await Promise.all((list.data.messages ?? []).filter(m => m.id).map(async (m): Promise<EmailCandidate> => {
-    const msg = await gmail.users.messages.get({ userId: "me", id: m.id!, format: "metadata", metadataHeaders: ["From", "Subject", "Date"] })
+    const msg = await gmail.users.messages.get({ userId: "me", id: m.id!, format: "full" })
     const headers = msg.data.payload?.headers ?? []
     const get = (name: string) => headers.find(h => h.name === name)?.value ?? ""
-    return { id: m.id!, from: get("From"), subject: get("Subject"), date: get("Date"), snippet: msg.data.snippet ?? "" }
+    const bodyText = findGmailBodyText(msg.data.payload).slice(0, EMAIL_BODY_MAX_CHARS)
+    return { id: m.id!, from: get("From"), subject: get("Subject"), date: get("Date"), snippet: bodyText || msg.data.snippet || "" }
   }))
 
   return { items, refreshedTokens }

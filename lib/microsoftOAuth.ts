@@ -1,3 +1,5 @@
+import { stripHtml, EMAIL_BODY_MAX_CHARS } from "@/lib/emailText"
+
 const TENANT = process.env.AZURE_AD_TENANT_ID ?? "common"
 const AUTHORITY = `https://login.microsoftonline.com/${TENANT}`
 
@@ -59,18 +61,24 @@ export async function listOutlookReceiptCandidates(accessToken: string): Promise
   const params = new URLSearchParams({
     "$search": '"receipt OR invoice OR order confirmation"',
     "$top": "10",
-    "$select": "id,from,subject,receivedDateTime,bodyPreview",
+    // bodyPreview alone is too short to contain the actual charged amount for
+    // most receipt emails — fetch the full body too so extraction can find it.
+    "$select": "id,from,subject,receivedDateTime,bodyPreview,body",
   })
   const res = await fetch(`https://graph.microsoft.com/v1.0/me/messages?${params.toString()}`, {
     headers: { Authorization: `Bearer ${accessToken}`, ConsistencyLevel: "eventual" },
   })
   if (!res.ok) throw new Error(`Graph API failed: ${res.status} ${await res.text()}`)
   const data = await res.json()
-  return (data.value ?? []).map((m: any) => ({
-    id: m.id,
-    from: m.from?.emailAddress?.address ?? "",
-    subject: m.subject ?? "",
-    date: m.receivedDateTime ?? "",
-    snippet: m.bodyPreview ?? "",
-  }))
+  return (data.value ?? []).map((m: any) => {
+    const bodyContent: string = m.body?.content ?? ""
+    const bodyText = m.body?.contentType === "html" ? stripHtml(bodyContent) : bodyContent
+    return {
+      id: m.id,
+      from: m.from?.emailAddress?.address ?? "",
+      subject: m.subject ?? "",
+      date: m.receivedDateTime ?? "",
+      snippet: (bodyText || m.bodyPreview || "").slice(0, EMAIL_BODY_MAX_CHARS),
+    }
+  })
 }
