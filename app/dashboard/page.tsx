@@ -56,6 +56,7 @@ export default function Dashboard() {
   const [trips, setTrips] = useState<any[]>([])
   const [emails, setEmails] = useState<any[]>([])
   const [emailConnected, setEmailConnected] = useState<string[]>([])
+  const [emailsLoading, setEmailsLoading] = useState(false)
   const [scanState, setScanState] = useState<ScanState>("idle")
   const [scanNote, setScanNote] = useState("")
   const [scanData, setScanData] = useState<any>(null)
@@ -137,11 +138,21 @@ export default function Dashboard() {
   }
 
   const fetchEmails = async () => {
-    const res = await fetch("/api/email")
-    if (res.ok) {
-      const data = await res.json()
-      setEmails(data.emails ?? [])
-      setEmailConnected(data.connected ?? [])
+    setEmailsLoading(true)
+    try {
+      const res = await fetch("/api/email")
+      if (res.ok) {
+        const data = await res.json()
+        setEmails(data.emails ?? [])
+        setEmailConnected(data.connected ?? [])
+      } else {
+        const err = await res.json().catch(() => null)
+        toast.error(errMsg(err, res.status === 504 ? "Checking your inbox took too long — try again" : "Couldn't check your inbox"))
+      }
+    } catch {
+      toast.error("Couldn't check your inbox — check your connection and try again")
+    } finally {
+      setEmailsLoading(false)
     }
   }
 
@@ -660,6 +671,7 @@ export default function Dashboard() {
             onToggleBilling={() => setBillingCycle(c => c === "monthly" ? "annual" : "monthly")}
             emails={emails}
             emailConnected={emailConnected}
+            emailsLoading={emailsLoading}
             importedEmails={importedEmails}
             onFetchEmails={fetchEmails}
             onImportEmail={startEmailImport}
@@ -1161,7 +1173,7 @@ function TaxesTab({ receipts, trips, isPro, onUpgrade }: any) {
   )
 }
 
-function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, emails, emailConnected, importedEmails, onFetchEmails, onImportEmail, onDisconnectEmail, onCheckout, onSignOut, onCsvFile, onSheetUrl, importing, onBrowseSheets, sheetFiles, onPickSheetFile, onCloseSheetFiles, sheetTabs, onPickSheetTab, onCloseSheetTabs }: any) {
+function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, emails, emailConnected, emailsLoading, importedEmails, onFetchEmails, onImportEmail, onDisconnectEmail, onCheckout, onSignOut, onCsvFile, onSheetUrl, importing, onBrowseSheets, sheetFiles, onPickSheetFile, onCloseSheetFiles, sheetTabs, onPickSheetTab, onCloseSheetTabs }: any) {
   const [sheetUrlInput, setSheetUrlInput] = useState("")
   const csvRef = useRef<HTMLInputElement>(null)
   const PRICES: Record<string, any> = {
@@ -1230,7 +1242,7 @@ function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, email
         <div className="flex items-center justify-between mb-2">
           <p className="text-sm font-medium">Email import</p>
           {emailConnected.length > 0 && (
-            <button onClick={onFetchEmails} className="text-xs text-gray-400 hover:text-gray-600 bg-transparent border-none cursor-pointer">↻ Check now</button>
+            <button onClick={onFetchEmails} disabled={emailsLoading} className="text-xs text-gray-400 hover:text-gray-600 bg-transparent border-none cursor-pointer disabled:opacity-50 disabled:cursor-default">{emailsLoading ? "Checking…" : "↻ Check now"}</button>
           )}
         </div>
         <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden">
@@ -1239,7 +1251,7 @@ function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, email
             return (
               <div key={p.provider} className="flex items-center gap-3 px-4 py-3 border-b border-gray-50 last:border-0">
                 <span className="text-lg">{p.icon}</span>
-                <div className="flex-1"><p className="text-sm font-medium">{p.label}</p><p className="text-xs text-gray-400">{connected ? session?.user?.email : "Not connected"}</p></div>
+                <div className="flex-1"><p className="text-sm font-medium">{p.label}</p><p className="text-xs text-gray-400">{connected ? session?.user?.email : emailsLoading ? "Checking…" : "Not connected"}</p></div>
                 {connected
                   ? <div className="flex items-center gap-2">
                       <span className="text-xs bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full font-medium">Connected</span>

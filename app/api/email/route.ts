@@ -9,6 +9,10 @@ import Anthropic from "@anthropic-ai/sdk"
 
 const client = new Anthropic()
 
+// Fetching candidates touches Gmail/Outlook APIs per email plus a Claude call;
+// the 10s Vercel default has been observed to cut this off mid-request.
+export const maxDuration = 60
+
 type Candidate = { id: string; from: string; subject: string; date: string; snippet: string; provider: "google" | "azure-ad" }
 
 async function extractReceipts(userId: string, items: Candidate[]) {
@@ -66,19 +70,18 @@ export async function GET(req: NextRequest) {
   if (plan === "FREE") return NextResponse.json({ error: "Email import requires Pro." }, { status: 403 })
 
   const tokens = await prisma.emailToken.findMany({ where: { userId: user.id } })
-  const candidates: Candidate[] = []
 
-  for (const token of tokens) {
+  const perTokenCandidates = await Promise.all(tokens.map(async (token): Promise<Candidate[]> => {
     try {
       if (token.provider === "google") {
         const { items, refreshedTokens } = await listGmailReceiptCandidates({ accessToken: token.accessToken, refreshToken: token.refreshToken })
-        candidates.push(...items.map(it => ({ ...it, provider: "google" as const })))
         if (refreshedTokens?.access_token) {
           await prisma.emailToken.update({
             where: { id: token.id },
             data: { accessToken: refreshedTokens.access_token, expiresAt: refreshedTokens.expiry_date ? new Date(refreshedTokens.expiry_date) : undefined },
           })
         }
+        return items.map(it => ({ ...it, provider: "google" as const }))
       } else if (token.provider === "azure-ad") {
         let accessToken = token.accessToken
         if (token.expiresAt && token.expiresAt < new Date() && token.refreshToken) {
@@ -90,12 +93,15 @@ export async function GET(req: NextRequest) {
           })
         }
         const items = await listOutlookReceiptCandidates(accessToken)
-        candidates.push(...items.map(it => ({ ...it, provider: "azure-ad" as const })))
+        return items.map(it => ({ ...it, provider: "azure-ad" as const }))
       }
+      return []
     } catch (err) {
       console.error(`Failed to fetch emails for provider ${token.provider}:`, err)
+      return []
     }
-  }
+  }))
+  const candidates: Candidate[] = perTokenCandidates.flat()
 
   const emails = await extractReceipts(user.id, candidates)
   return NextResponse.json({ emails, connected: tokens.map(t => t.provider) })

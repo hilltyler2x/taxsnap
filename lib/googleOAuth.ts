@@ -39,14 +39,12 @@ export async function listGmailReceiptCandidates(token: { accessToken: string; r
     maxResults: 10,
   })
 
-  const items: EmailCandidate[] = []
-  for (const m of list.data.messages ?? []) {
-    if (!m.id) continue
-    const msg = await gmail.users.messages.get({ userId: "me", id: m.id, format: "metadata", metadataHeaders: ["From", "Subject", "Date"] })
+  const items = await Promise.all((list.data.messages ?? []).filter(m => m.id).map(async (m): Promise<EmailCandidate> => {
+    const msg = await gmail.users.messages.get({ userId: "me", id: m.id!, format: "metadata", metadataHeaders: ["From", "Subject", "Date"] })
     const headers = msg.data.payload?.headers ?? []
     const get = (name: string) => headers.find(h => h.name === name)?.value ?? ""
-    items.push({ id: m.id, from: get("From"), subject: get("Subject"), date: get("Date"), snippet: msg.data.snippet ?? "" })
-  }
+    return { id: m.id!, from: get("From"), subject: get("Subject"), date: get("Date"), snippet: msg.data.snippet ?? "" }
+  }))
 
   return { items, refreshedTokens }
 }
