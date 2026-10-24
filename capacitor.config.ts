@@ -17,6 +17,9 @@ const config: CapacitorConfig = {
   },
   android: {
     backgroundColor: "#f9fafb",
+    // Background trip tracking: without this, Android stops delivering location to the
+    // web view after about 5 minutes in the background.
+    useLegacyBridge: true,
   },
   plugins: {
     SystemBars: {
