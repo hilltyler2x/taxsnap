@@ -2,10 +2,14 @@ import { NextRequest, NextResponse } from "next/server"
 import { getCurrentUser } from "@/lib/auth"
 import { getGoogleOAuthClient } from "@/lib/googleOAuth"
 import { prisma } from "@/lib/prisma"
+import { verifyUserToken } from "@/lib/nativeHandoff"
 
 export async function GET(req: NextRequest) {
-  const user = await getCurrentUser()
+  const nativeUserId = verifyUserToken(req.cookies.get("email_oauth_native")?.value)
+  const user = nativeUserId ? { id: nativeUserId } : await getCurrentUser()
   if (!user) return NextResponse.redirect(new URL("/login", process.env.APP_URL))
+  // Started from the phone app: finish on a page that sends the user back into the app.
+  const finish = (path: string) => new URL(nativeUserId ? `/native/return?to=${encodeURIComponent(path)}` : path, process.env.APP_URL!)
 
   const { searchParams } = new URL(req.url)
   const code = searchParams.get("code")
@@ -13,7 +17,7 @@ export async function GET(req: NextRequest) {
   const savedState = req.cookies.get("email_oauth_state")?.value
 
   if (!code || !state || state !== savedState) {
-    return NextResponse.redirect(new URL("/dashboard?tab=account&email_error=1", process.env.APP_URL!))
+    return NextResponse.redirect(finish("/dashboard?tab=account&email_error=1"))
   }
 
   try {
@@ -38,10 +42,11 @@ export async function GET(req: NextRequest) {
     })
   } catch (err) {
     console.error("Google OAuth token exchange failed:", err)
-    return NextResponse.redirect(new URL("/dashboard?tab=account&email_error=1", process.env.APP_URL!))
+    return NextResponse.redirect(finish("/dashboard?tab=account&email_error=1"))
   }
 
-  const res = NextResponse.redirect(new URL("/dashboard?tab=account&email_connected=google", process.env.APP_URL!))
+  const res = NextResponse.redirect(finish("/dashboard?tab=account&email_connected=google"))
   res.cookies.delete("email_oauth_state")
+  res.cookies.delete("email_oauth_native")
   return res
 }

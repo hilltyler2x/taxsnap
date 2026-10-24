@@ -1,6 +1,11 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server"
 
-const isPublicRoute = createRouteMatcher(["/landing(.*)", "/explore(.*)", "/login(.*)", "/"])
+// /native/* and the email connect/callback routes are also reached from the phone app's
+// system browser, which has no session; those routes check who the user is themselves.
+const isPublicRoute = createRouteMatcher([
+  "/landing(.*)", "/explore(.*)", "/login(.*)", "/privacy(.*)", "/native(.*)", "/",
+  "/api/email/connect(.*)", "/api/email/callback(.*)",
+])
 const isApiRoute = createRouteMatcher(["/api(.*)"])
 
 export default clerkMiddleware(async (auth, request) => {

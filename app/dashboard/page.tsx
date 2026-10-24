@@ -3,6 +3,7 @@ import { useUser, useClerk } from "@clerk/nextjs"
 import { useEffect, useState, useRef } from "react"
 import toast from "react-hot-toast"
 import { calcDeductible, IRS_MILEAGE_RATE, CATEGORIES, BUSINESS_PURPOSES } from "@/lib/irs"
+import { usePlatform, takeReceiptPhoto, hapticSuccess, saveOrShareFile, openInSystemBrowser, openSignedLink } from "@/lib/native"
 
 const CC: Record<string, string> = {
   Travel: "#1D9E75", Meals: "#BA7517", Office: "#185FA5",
@@ -81,6 +82,11 @@ export default function Dashboard() {
   const [aiStatusMsg, setAiStatusMsg] = useState("Reading your receipt...")
   const galleryRef = useRef<HTMLInputElement>(null)
   const cameraRef = useRef<HTMLInputElement>(null)
+  const platform = usePlatform()
+  const isNative = platform !== "web"
+  // The iPhone app can't sell or point to Stripe plans (App Store rule 3.1.1), so it
+  // shows no prices or upgrade buttons. Pro bought on the website still applies.
+  const isIOS = platform === "ios"
 
   const plan = me?.plan ?? "FREE"
   const isPro = plan !== "FREE"
@@ -197,6 +203,19 @@ export default function Dashboard() {
     }
   }
 
+  const pickPhoto = async (source: "camera" | "photos") => {
+    if (!isNative) {
+      (source === "camera" ? cameraRef : galleryRef).current?.click()
+      return
+    }
+    try {
+      const file = await takeReceiptPhoto(source)
+      if (file) handleRealUpload(file)
+    } catch {
+      toast.error(source === "camera" ? "Couldn't open the camera — check TaxSnap's camera access in Settings" : "Couldn't open your photos — check TaxSnap's photo access in Settings")
+    }
+  }
+
   // ─── DEMO SCAN — only fake data, no file needed ───
   const runDemoScan = () => {
     const d = DEMO_RECEIPTS[demoIdx % DEMO_RECEIPTS.length]
@@ -226,6 +245,7 @@ export default function Dashboard() {
     })
     if (res.ok) {
       toast.success("Receipt saved!")
+      hapticSuccess()
       setScanState("idle")
       setScanForm(null)
       fetchReceipts()
@@ -479,7 +499,23 @@ export default function Dashboard() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ priceId }),
     })
-    if (res.ok) { const { url } = await res.json(); window.location.href = url }
+    if (!res.ok) return
+    const { url } = await res.json()
+    // In the Android app, pay in the system browser and refresh the plan when it closes.
+    if (isNative) openInSystemBrowser(url, fetchMe)
+    else window.location.href = url
+  }
+
+  const deleteAccount = async () => {
+    if (!confirm("Delete your TaxSnap account? This permanently deletes all your receipts, trips and photos, disconnects your email, and cancels any subscription. This can't be undone.")) return
+    const res = await fetch("/api/me", { method: "DELETE" })
+    if (!res.ok) {
+      const err = await res.json().catch(() => null)
+      toast.error(errMsg(err, "Couldn't delete your account. Try again."))
+      return
+    }
+    toast.success("Your account was deleted")
+    await signOut({ redirectUrl: "/landing" }).catch(() => { window.location.href = "/landing" })
   }
 
   const onDestInput = (val: string) => {
@@ -498,7 +534,7 @@ export default function Dashboard() {
     trips.reduce((s, t) => s + t.deductible, 0)
 
   if (!isLoaded) {
-    return <div className="min-h-screen bg-gray-50 flex items-center justify-center text-sm text-gray-400">Loading...</div>
+    return <div className="h-dvh bg-gray-50 flex items-center justify-center text-sm text-gray-400">Loading...</div>
   }
 
   const displayUser = {
@@ -508,10 +544,12 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="flex flex-col min-h-screen max-w-lg mx-auto bg-gray-50">
+    // Screen-sized shell: top bar and bottom nav stay put, only the middle scrolls.
+    <div className="flex flex-col h-dvh max-w-lg mx-auto bg-gray-50 overflow-hidden">
 
       {/* Top bar */}
-      <div className="bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between sticky top-0 z-10">
+      <div className="bg-white border-b border-gray-100 pt-safe flex-shrink-0 z-10">
+      <div className="px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 bg-emerald-500 rounded-md flex items-center justify-center text-white text-xs">📄</div>
           <span className="font-medium text-sm">TaxSnap</span>
@@ -525,9 +563,10 @@ export default function Dashboard() {
           {plan === "OWNER" ? "Owner" : plan === "LIFETIME" ? "Lifetime" : plan.charAt(0) + plan.slice(1).toLowerCase()}
         </button>
       </div>
+      </div>
 
       {/* Main content */}
-      <div className="flex-1 overflow-y-auto pb-20 px-3 pt-3">
+      <div className="flex-1 overflow-y-auto overscroll-contain pb-4 px-3 pt-3">
 
         {/* HOME */}
         {tab === "home" && (
@@ -569,13 +608,13 @@ export default function Dashboard() {
                 {/* Real upload buttons */}
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   <button
-                    onClick={() => galleryRef.current?.click()}
+                    onClick={() => pickPhoto("photos")}
                     className="bg-emerald-500 text-white rounded-xl py-2.5 text-xs font-medium flex items-center justify-center gap-1.5"
                   >
                     🖼 Photo library
                   </button>
                   <button
-                    onClick={() => cameraRef.current?.click()}
+                    onClick={() => pickPhoto("camera")}
                     className="bg-emerald-500 text-white rounded-xl py-2.5 text-xs font-medium flex items-center justify-center gap-1.5"
                   >
                     📷 Take photo
@@ -651,13 +690,13 @@ export default function Dashboard() {
         {/* MILES */}
         {tab === "miles" && (
           !isPro
-            ? <LockScreen icon="🚗" title="Mileage tracking is Pro" sub="Log IRS-compliant trips with destination and odometer readings. Upgrade to Pro for $5/month." onUpgrade={() => setTab("account")} />
+            ? <LockScreen icon="🚗" title="Mileage tracking is Pro" sub={isIOS ? "Log IRS-compliant trips with destination and odometer readings with TaxSnap Pro." : "Log IRS-compliant trips with destination and odometer readings. Upgrade to Pro for $5/month."} onUpgrade={isIOS ? undefined : () => setTab("account")} />
             : <MilesTab trips={trips} onSave={saveTrip} onDestInput={onDestInput} suggestions={destSuggestions} onSelectDest={() => setDestSuggestions([])} onEditTrip={openEditTrip} />
         )}
 
         {/* TAXES */}
         {tab === "taxes" && (
-          <TaxesTab receipts={receipts} trips={trips} isPro={isPro} onUpgrade={() => setTab("account")} />
+          <TaxesTab receipts={receipts} trips={trips} isPro={isPro} isIOS={isIOS} onUpgrade={isIOS ? undefined : () => setTab("account")} />
         )}
 
         {/* ACCOUNT */}
@@ -687,13 +726,16 @@ export default function Dashboard() {
             sheetTabs={sheetTabs}
             onPickSheetTab={(tab: string) => sheetTabs && importFromSheet(sheetTabs.file.id, tab)}
             onCloseSheetTabs={() => setSheetTabs(null)}
+            isNative={isNative}
+            isIOS={isIOS}
+            onDeleteAccount={deleteAccount}
           />
         )}
       </div>
 
       {/* Edit receipt modal */}
       {editingReceipt && editForm && (
-        <div className="fixed inset-0 bg-black/40 z-20 flex items-end sm:items-center justify-center p-3" onClick={() => { setEditingReceipt(null); setEditForm(null) }}>
+        <div className="fixed inset-0 bg-black/40 z-20 flex items-end sm:items-center justify-center p-3 modal-safe" onClick={() => { setEditingReceipt(null); setEditForm(null) }}>
           <div className="w-full max-w-lg max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <ScanConfirmForm
               form={editForm}
@@ -710,7 +752,7 @@ export default function Dashboard() {
 
       {/* Edit trip modal */}
       {editingTrip && editTripForm && (
-        <div className="fixed inset-0 bg-black/40 z-20 flex items-end sm:items-center justify-center p-3" onClick={() => { setEditingTrip(null); setEditTripForm(null) }}>
+        <div className="fixed inset-0 bg-black/40 z-20 flex items-end sm:items-center justify-center p-3 modal-safe" onClick={() => { setEditingTrip(null); setEditTripForm(null) }}>
           <div className="w-full max-w-lg max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <TripEditForm
               form={editTripForm}
@@ -728,7 +770,7 @@ export default function Dashboard() {
 
       {/* Email import review modal */}
       {emailDraft && emailDraftForm && (
-        <div className="fixed inset-0 bg-black/40 z-20 flex items-end sm:items-center justify-center p-3" onClick={() => { setEmailDraft(null); setEmailDraftForm(null) }}>
+        <div className="fixed inset-0 bg-black/40 z-20 flex items-end sm:items-center justify-center p-3 modal-safe" onClick={() => { setEmailDraft(null); setEmailDraftForm(null) }}>
           <div className="w-full max-w-lg max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <ScanConfirmForm
               form={emailDraftForm}
@@ -744,7 +786,7 @@ export default function Dashboard() {
 
       {/* Import preview modal */}
       {importPreview && (
-        <div className="fixed inset-0 bg-black/40 z-20 flex items-end sm:items-center justify-center p-3" onClick={() => { setImportPreview(null); setImportSelected(new Set()) }}>
+        <div className="fixed inset-0 bg-black/40 z-20 flex items-end sm:items-center justify-center p-3 modal-safe" onClick={() => { setImportPreview(null); setImportSelected(new Set()) }}>
           <div className="w-full max-w-lg max-h-[85vh] overflow-y-auto bg-white rounded-2xl p-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-1">
               <p className="text-sm font-medium">Review import — {importSelected.size} of {importPreview.length} selected</p>
@@ -787,7 +829,7 @@ export default function Dashboard() {
       )}
 
       {/* Bottom nav */}
-      <div className="fixed bottom-0 left-0 right-0 max-w-lg mx-auto bg-white border-t border-gray-100 flex z-10">
+      <div className="flex-shrink-0 bg-white border-t border-gray-100 flex pb-safe z-10">
         {(["home", "receipts", "miles", "taxes", "account"] as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)} className={`flex-1 flex flex-col items-center py-2 gap-0.5 border-none bg-transparent cursor-pointer ${tab === t ? "text-emerald-500" : "text-gray-400"}`}>
             <span className="text-xl">{{ home: "⌂", receipts: "🧾", miles: "🚗", taxes: "📊", account: "👤" }[t]}</span>
@@ -925,7 +967,7 @@ function LockScreen({ icon, title, sub, onUpgrade }: any) {
       <p className="text-3xl mb-3">{icon}</p>
       <p className="font-medium mb-2">{title}</p>
       <p className="text-sm text-gray-500 mb-5 leading-relaxed">{sub}</p>
-      <button onClick={onUpgrade} className="bg-emerald-500 text-white px-6 py-2.5 rounded-xl text-sm font-medium">See plans</button>
+      {onUpgrade && <button onClick={onUpgrade} className="bg-emerald-500 text-white px-6 py-2.5 rounded-xl text-sm font-medium">See plans</button>}
     </div>
   )
 }
@@ -1045,7 +1087,7 @@ function TripEditForm({ form, onChange, onSave, onDiscard, onDelete, onDestInput
   )
 }
 
-function TaxesTab({ receipts, trips, isPro, onUpgrade }: any) {
+function TaxesTab({ receipts, trips, isPro, isIOS, onUpgrade }: any) {
   const bycat: Record<string, number> = {}
   receipts.forEach((r: any) => { bycat[r.category] = (bycat[r.category] ?? 0) + (r.deductible ?? 0) })
   const milesDed = trips.reduce((s: number, t: any) => s + (t.deductible ?? 0), 0)
@@ -1056,8 +1098,7 @@ function TaxesTab({ receipts, trips, isPro, onUpgrade }: any) {
   const handleExport = async () => {
     const res = await fetch("/api/export?format=csv")
     if (!res.ok) { const e = await res.json(); alert(errMsg(e, "Export failed")); return }
-    const blob = await res.blob()
-    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `taxsnap_irs_${new Date().getFullYear()}.csv`; a.click()
+    await saveOrShareFile(`taxsnap_irs_${new Date().getFullYear()}.csv`, await res.blob())
   }
 
   const handleExportPdf = async () => {
@@ -1142,7 +1183,7 @@ function TaxesTab({ receipts, trips, isPro, onUpgrade }: any) {
       })
     }
 
-    doc.save(`taxsnap_summary_${year}.pdf`)
+    await saveOrShareFile(`taxsnap_summary_${year}.pdf`, doc.output("blob"))
   }
 
   return (
@@ -1168,14 +1209,23 @@ function TaxesTab({ receipts, trips, isPro, onUpgrade }: any) {
           <button onClick={handleExport} className="w-full bg-emerald-500 text-white py-3 rounded-xl text-sm font-medium">📊 Download IRS-ready CSV</button>
           <button onClick={handleExportPdf} className="w-full border border-gray-200 py-3 rounded-xl text-sm font-medium text-gray-700">📄 Export PDF summary</button>
         </div>
-      ) : <LockScreen icon="📊" title="Export is Pro" sub="Download IRS-ready CSV and PDF for your accountant. Upgrade for $5/month." onUpgrade={onUpgrade} />}
+      ) : <LockScreen icon="📊" title="Export is Pro" sub={isIOS ? "Download IRS-ready CSV and PDF for your accountant with TaxSnap Pro." : "Download IRS-ready CSV and PDF for your accountant. Upgrade for $5/month."} onUpgrade={onUpgrade} />}
     </div>
   )
 }
 
-function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, emails, emailConnected, emailsLoading, importedEmails, onFetchEmails, onImportEmail, onDisconnectEmail, onCheckout, onSignOut, onCsvFile, onSheetUrl, importing, onBrowseSheets, sheetFiles, onPickSheetFile, onCloseSheetFiles, sheetTabs, onPickSheetTab, onCloseSheetTabs }: any) {
+function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, emails, emailConnected, emailsLoading, importedEmails, onFetchEmails, onImportEmail, onDisconnectEmail, onCheckout, onSignOut, onCsvFile, onSheetUrl, importing, onBrowseSheets, sheetFiles, onPickSheetFile, onCloseSheetFiles, sheetTabs, onPickSheetTab, onCloseSheetTabs, isNative, isIOS, onDeleteAccount }: any) {
   const [sheetUrlInput, setSheetUrlInput] = useState("")
   const csvRef = useRef<HTMLInputElement>(null)
+  const proOnly = (feature: string) => alert(isIOS ? `${feature} is a Pro feature.` : `${feature} requires Pro. Upgrade in Account.`)
+  // Google and Microsoft block their sign-in pages inside the app, so connect in the system browser.
+  const connectEmail = (e: any, provider: string, feature: string) => {
+    if (!isPro) { e.preventDefault(); proOnly(feature); return }
+    if (isNative) {
+      e.preventDefault()
+      openSignedLink(`/api/email/connect/${provider}`).catch(() => alert("Couldn't open the sign-in page. Try again."))
+    }
+  }
   const PRICES: Record<string, any> = {
     proMonthly: process.env.NEXT_PUBLIC_STRIPE_PRO_MONTHLY ?? "",
     proAnnual: process.env.NEXT_PUBLIC_STRIPE_PRO_ANNUAL ?? "",
@@ -1200,6 +1250,9 @@ function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, email
         <button onClick={onSignOut} className="w-full text-left px-4 py-3 text-xs text-red-600 border-t border-gray-100 hover:bg-red-50 transition-colors">
           Sign out
         </button>
+        <button onClick={onDeleteAccount} className="w-full text-left px-4 py-3 text-xs text-gray-400 border-t border-gray-100 hover:text-red-600 hover:bg-red-50 transition-colors">
+          Delete account
+        </button>
       </div>
 
       {plan === "OWNER" && (
@@ -1209,7 +1262,7 @@ function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, email
         </div>
       )}
 
-      {plan === "FREE" && (
+      {plan === "FREE" && !isIOS && (
         <div className="mb-3">
           <div className="flex items-center justify-center gap-3 mb-3">
             <span className={`text-xs cursor-pointer ${billingCycle === "monthly" ? "font-medium" : "text-gray-400"}`} onClick={onToggleBilling}>Monthly</span>
@@ -1257,7 +1310,7 @@ function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, email
                       <span className="text-xs bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full font-medium">Connected</span>
                       <button onClick={() => onDisconnectEmail(p.provider)} className="text-xs text-gray-400 hover:text-red-600 cursor-pointer bg-transparent border-none">Disconnect</button>
                     </div>
-                  : <a href={isPro ? `/api/email/connect/${p.provider}` : undefined} onClick={e => { if (!isPro) { e.preventDefault(); alert("Email import requires Pro. Upgrade in Account.") } }} className="text-xs border border-gray-200 px-3 py-1.5 rounded-lg cursor-pointer no-underline text-gray-700">Connect</a>
+                  : <a href={isPro ? `/api/email/connect/${p.provider}` : undefined} onClick={e => connectEmail(e, p.provider, "Email import")} className="text-xs border border-gray-200 px-3 py-1.5 rounded-lg cursor-pointer no-underline text-gray-700">Connect</a>
                 }
               </div>
             )
@@ -1294,7 +1347,7 @@ function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, email
         <div className="bg-white border border-gray-100 rounded-2xl p-4">
           <p className="text-xs text-gray-500 mb-3">Already tracking expenses in a spreadsheet? Import it here — AI reads whatever columns you have.</p>
           <button
-            onClick={() => { if (!isPro) { alert("Bulk import requires Pro. Upgrade in Account."); return } csvRef.current?.click() }}
+            onClick={() => { if (!isPro) { proOnly("Bulk import"); return } csvRef.current?.click() }}
             disabled={importing}
             className="w-full bg-emerald-500 text-white rounded-xl py-2.5 text-xs font-medium mb-2 disabled:opacity-50"
           >
@@ -1311,7 +1364,7 @@ function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, email
             />
             <button
               onClick={() => {
-                if (!isPro) { alert("Bulk import requires Pro. Upgrade in Account."); return }
+                if (!isPro) { proOnly("Bulk import"); return }
                 if (!sheetUrlInput.trim()) return
                 onSheetUrl(sheetUrlInput.trim())
               }}
@@ -1325,7 +1378,7 @@ function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, email
           <div className="border-t border-gray-100 mt-3 pt-3">
             {emailConnected.includes("google") ? (
               <button
-                onClick={() => { if (!isPro) { alert("Bulk import requires Pro. Upgrade in Account."); return } onBrowseSheets() }}
+                onClick={() => { if (!isPro) { proOnly("Bulk import"); return } onBrowseSheets() }}
                 disabled={importing}
                 className="w-full border border-gray-200 rounded-xl py-2.5 text-xs font-medium text-gray-700 disabled:opacity-50"
               >
@@ -1334,7 +1387,7 @@ function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, email
             ) : (
               <a
                 href={isPro ? "/api/email/connect/google" : undefined}
-                onClick={e => { if (!isPro) { e.preventDefault(); alert("Bulk import requires Pro. Upgrade in Account.") } }}
+                onClick={e => connectEmail(e, "google", "Bulk import")}
                 className="w-full block text-center border border-gray-200 rounded-xl py-2.5 text-xs font-medium text-gray-700 no-underline cursor-pointer"
               >
                 🔗 Connect Google to browse Sheets directly
@@ -1346,7 +1399,7 @@ function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, email
 
       {/* Google Sheets file picker */}
       {sheetFiles && (
-        <div className="fixed inset-0 bg-black/40 z-20 flex items-end sm:items-center justify-center p-3" onClick={onCloseSheetFiles}>
+        <div className="fixed inset-0 bg-black/40 z-20 flex items-end sm:items-center justify-center p-3 modal-safe" onClick={onCloseSheetFiles}>
           <div className="w-full max-w-lg max-h-[70vh] overflow-y-auto bg-white rounded-2xl p-4" onClick={(e: any) => e.stopPropagation()}>
             <p className="text-sm font-medium mb-3">Choose a spreadsheet</p>
             <div className="space-y-1">
@@ -1363,7 +1416,7 @@ function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, email
 
       {/* Google Sheets tab picker */}
       {sheetTabs && (
-        <div className="fixed inset-0 bg-black/40 z-20 flex items-end sm:items-center justify-center p-3" onClick={onCloseSheetTabs}>
+        <div className="fixed inset-0 bg-black/40 z-20 flex items-end sm:items-center justify-center p-3 modal-safe" onClick={onCloseSheetTabs}>
           <div className="w-full max-w-lg max-h-[70vh] overflow-y-auto bg-white rounded-2xl p-4" onClick={(e: any) => e.stopPropagation()}>
             <p className="text-sm font-medium mb-3">{sheetTabs.file.name} — choose a tab</p>
             <div className="space-y-1">
@@ -1378,6 +1431,7 @@ function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, email
         </div>
       )}
 
+      <p className="text-center text-xs mt-4 mb-2"><a href="/privacy" className="text-gray-400">Privacy policy</a></p>
     </div>
   )
 }

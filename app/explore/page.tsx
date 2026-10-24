@@ -1,6 +1,7 @@
 "use client"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import { usePlatform } from "@/lib/native"
 
 const DEMO_RECEIPTS = [
   { id: 1, name: "Delta Airlines", amount: 487.50, date: "2025-06-10", category: "Travel", purpose: "NYC conference" },
@@ -38,6 +39,7 @@ function ReceiptCard({ r }: { r: any }) {
 
 export default function ExplorePage() {
   const router = useRouter()
+  const isIOS = usePlatform() === "ios"
   const [tab, setTab] = useState("home")
   const totalDed = DEMO_RECEIPTS.reduce((s, r) => s + r.amount * (r.category === "Meals" ? 0.5 : 1), 0)
 
@@ -110,7 +112,7 @@ export default function ExplorePage() {
             </div>
             <div style={{ marginTop: "12px", background: "#fff", border: "1px solid #eee", borderRadius: "12px", padding: "16px", textAlign: "center" }}>
               <p style={{ fontSize: "13px", color: "#666", margin: "0 0 10px" }}>Export IRS-ready CSV — sign up to unlock</p>
-              <button onClick={() => router.push("/landing")} style={{ background: "#1D9E75", color: "#fff", border: "none", borderRadius: "8px", padding: "9px 18px", fontSize: "13px", fontWeight: "500", cursor: "pointer" }}>Start free trial →</button>
+              <button onClick={() => router.push("/landing")} style={{ background: "#1D9E75", color: "#fff", border: "none", borderRadius: "8px", padding: "9px 18px", fontSize: "13px", fontWeight: "500", cursor: "pointer" }}>{isIOS ? "Get started →" : "Start free trial →"}</button>
             </div>
           </div>
         )}
