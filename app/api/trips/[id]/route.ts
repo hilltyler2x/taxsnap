@@ -1,16 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getCurrentUser } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
-import { calcMileageDeductible } from "@/lib/irs"
-import { z } from "zod"
-
-const TripUpdateSchema = z.object({
-  purpose: z.string().min(1),
-  destination: z.string().min(1),
-  odoStart: z.number().int().positive(),
-  odoEnd: z.number().int().positive(),
-  date: z.string(),
-})
+import { TripInputSchema, tripData } from "@/lib/tripInput"
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getCurrentUser()
@@ -20,24 +11,23 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (!existing || existing.userId !== user.id) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
   const body = await req.json()
-  const parsed = TripUpdateSchema.safeParse(body)
+  const parsed = TripInputSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
-  const data = parsed.data
-  if (data.odoEnd <= data.odoStart) return NextResponse.json({ error: "Odometer end must be greater than start" }, { status: 400 })
-
-  const miles = data.odoEnd - data.odoStart
-  const trip = await prisma.trip.update({
-    where: { id: params.id },
-    data: {
-      purpose: data.purpose,
-      destination: data.destination,
-      odoStart: data.odoStart,
-      odoEnd: data.odoEnd,
-      miles,
-      date: new Date(data.date),
-      deductible: calcMileageDeductible(miles),
-    },
+  // Saving an edit confirms the trip as business, so it leaves the review list.
+  // GPS details the form doesn't show are kept from the original trip.
+  const result = tripData({
+    ...parsed.data,
+    needsReview: false,
+    source: parsed.data.source ?? existing.source as any,
+    startPlace: parsed.data.startPlace !== undefined ? parsed.data.startPlace : existing.startPlace,
+    startLat: existing.startLat, startLng: existing.startLng,
+    endLat: existing.endLat, endLng: existing.endLng,
+    startedAt: existing.startedAt?.toISOString() ?? null,
+    endedAt: existing.endedAt?.toISOString() ?? null,
   })
+  if ("error" in result) return NextResponse.json({ error: result.error }, { status: 400 })
+
+  const trip = await prisma.trip.update({ where: { id: params.id }, data: result.data })
   return NextResponse.json({ trip })
 }
 

@@ -1,4 +1,18 @@
-export const IRS_MILEAGE_RATE = 0.70 // 2025 rate per mile
+// IRS business standard mileage rate per mile, by tax year. Add next year's rate when the
+// IRS announces it (usually mid-December). Years without an entry use the latest rate.
+export const IRS_MILEAGE_RATES: Record<number, number> = {
+  2024: 0.67,
+  2025: 0.70,
+  2026: 0.725,
+}
+
+const LATEST_RATE_YEAR = Math.max(...Object.keys(IRS_MILEAGE_RATES).map(Number))
+
+export function mileageRateFor(year: number): number {
+  return IRS_MILEAGE_RATES[year] ?? IRS_MILEAGE_RATES[LATEST_RATE_YEAR]
+}
+
+export const IRS_MILEAGE_RATE = mileageRateFor(new Date().getFullYear())
 
 export const DEDUCT_RATES: Record<string, number> = {
   Travel: 1.0,
@@ -69,8 +83,10 @@ export function calcDeductible(
   return amount * (DEDUCT_RATES[category] ?? 0.5)
 }
 
-export function calcMileageDeductible(miles: number): number {
-  return miles * IRS_MILEAGE_RATE
+// date is the trip date, so a trip keeps the rate of the year it was driven.
+export function calcMileageDeductible(miles: number, date?: Date): number {
+  const year = date ? date.getUTCFullYear() : new Date().getFullYear()
+  return Math.round(miles * mileageRateFor(year) * 100) / 100
 }
 
 // IRS required fields per category

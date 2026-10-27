@@ -157,3 +157,20 @@ taxsnap/
 | Google/Microsoft OAuth | Free | Free |
 
 For the first few hundred users, total cost is effectively $0.
+
+## Phone apps (iPhone and Android)
+
+The apps are a Capacitor shell (`capacitor.config.ts`, `ios/`, `android/`) around the live site at
+https://taxsnap-jet.vercel.app. Web changes reach the apps as soon as they're deployed to Vercel; only
+native changes (plugins, icons, `Info.plist`, `AndroidManifest.xml`) need a new app build.
+
+- App ID / bundle ID: `com.hilltyler.taxsnap`
+- Native-only code lives in `lib/native.ts` and `app/NativeShell.tsx`. Sign-in and Gmail/Outlook connect
+  run in the system browser (Google blocks them inside app web views) and return through `taxsnap://` links
+  (`app/native/*`, `app/api/native/*`).
+- The iPhone app hides prices and upgrade buttons (App Store rule 3.1.1). Pro bought on the website still applies.
+- `.github/workflows/build.yml` builds both apps on every pull request. On merge to main it publishes
+  `TaxSnap-test.apk` and `TaxSnap-unsigned.ipa` on the `test-build` release and uploads to TestFlight when the
+  `APPLE_TEAM_ID`, `ASC_KEY_ID`, `ASC_ISSUER_ID` and `ASC_KEY_P8` secrets are set.
+- After adding or upgrading a Capacitor plugin, run `npx cap sync` and commit the `ios/` and `android/` changes.
+- Icons and splash come from `assets/` via `npx capacitor-assets generate`.
