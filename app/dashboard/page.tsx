@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from "react"
 import toast from "react-hot-toast"
 import { calcDeductible, IRS_MILEAGE_RATE, mileageRateFor, CATEGORIES, BUSINESS_PURPOSES } from "@/lib/irs"
 import { usePlatform, takeReceiptPhoto, hapticSuccess, saveOrShareFile, openInSystemBrowser, openSignedLink } from "@/lib/native"
+import { noteAppOpen, reviewMoment, reviewAvailable, openStoreReview } from "@/lib/review"
 import { tripTracker, tripMiles, localDay, placeName, type TrackerState } from "@/lib/tripTracker"
 
 const CC: Record<string, string> = {
@@ -111,6 +112,8 @@ export default function Dashboard() {
 
   const plan = me?.plan ?? "FREE"
   const isPro = plan !== "FREE"
+
+  useEffect(() => { if (isNative) noteAppOpen() }, [isNative])
 
   useEffect(() => {
     if (isLoaded && isSignedIn) {
@@ -287,6 +290,7 @@ export default function Dashboard() {
     if (res.ok) {
       toast.success("Receipt saved!")
       hapticSuccess()
+      reviewMoment()
       setScanState("idle")
       setScanForm(null)
       fetchReceipts()
@@ -339,7 +343,7 @@ export default function Dashboard() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     })
-    if (res.ok) { toast.success("Trip logged!"); fetchTrips(); return true }
+    if (res.ok) { toast.success("Trip logged!"); fetchTrips(); reviewMoment(); return true }
     const e = await res.json(); toast.error(errMsg(e, "Failed")); return false
   }
 
@@ -390,6 +394,7 @@ export default function Dashboard() {
     })
     if (res.ok) {
       toast.success(editingTrip.needsReview ? "Saved as a business trip!" : "Trip updated!")
+      if (editingTrip.needsReview) reviewMoment()
       setEditingTrip(null)
       setEditTripForm(null)
       fetchTrips()
@@ -446,6 +451,7 @@ export default function Dashboard() {
       const id = emailDraft.gmailId ?? emailDraft.outlookId
       setImportedEmails(prev => new Set(Array.from(prev).concat(id)))
       toast.success("Imported!")
+      reviewMoment()
       setEmailDraft(null)
       setEmailDraftForm(null)
       fetchReceipts()
@@ -570,6 +576,7 @@ export default function Dashboard() {
     }
     const dupeSuffix = dupes ? `, skipped ${dupes} duplicate${dupes === 1 ? "" : "s"} already on file` : ""
     toast.success(`Imported ${count} receipt${count === 1 ? "" : "s"}${dupeSuffix}`)
+    if (count) reviewMoment(2)
     setImportPreview(null)
     setImportSelected(new Set())
     fetchReceipts()
@@ -1294,10 +1301,19 @@ function TaxesTab({ receipts, trips, isPro, isIOS, onUpgrade }: any) {
   const total = Object.values(bycat).reduce((s, v) => s + v, 0)
   const max = Math.max(...Object.values(bycat), 1)
 
+  // Seeing a real deductions total is a good moment to ask for a review.
+  const bigTotal = total >= 250
+  useEffect(() => {
+    if (!bigTotal) return
+    const t = setTimeout(() => reviewMoment(0), 2500)
+    return () => clearTimeout(t)
+  }, [bigTotal])
+
   const handleExport = async () => {
     const res = await fetch("/api/export?format=csv")
     if (!res.ok) { const e = await res.json(); alert(errMsg(e, "Export failed")); return }
     await saveOrShareFile(`taxsnap_irs_${new Date().getFullYear()}.csv`, await res.blob())
+    reviewMoment(3)
   }
 
   const handleExportPdf = async () => {
@@ -1383,6 +1399,7 @@ function TaxesTab({ receipts, trips, isPro, isIOS, onUpgrade }: any) {
     }
 
     await saveOrShareFile(`taxsnap_summary_${year}.pdf`, doc.output("blob"))
+    reviewMoment(3)
   }
 
   return (
@@ -1415,6 +1432,8 @@ function TaxesTab({ receipts, trips, isPro, isIOS, onUpgrade }: any) {
 
 function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, emails, emailConnected, emailsLoading, importedEmails, onFetchEmails, onImportEmail, onDisconnectEmail, onCheckout, onSignOut, onCsvFile, onSheetUrl, importing, onBrowseSheets, sheetFiles, onPickSheetFile, onCloseSheetFiles, sheetTabs, onPickSheetTab, onCloseSheetTabs, isNative, isIOS, onDeleteAccount, tracker, onToggleAutoTrips, onOpenLocationSettings }: any) {
   const [sheetUrlInput, setSheetUrlInput] = useState("")
+  const [canRate, setCanRate] = useState(false)
+  useEffect(() => { setCanRate(reviewAvailable()) }, [])
   const csvRef = useRef<HTMLInputElement>(null)
   const proOnly = (feature: string) => alert(isIOS ? `${feature} is a Pro feature.` : `${feature} requires Pro. Upgrade in Account.`)
   // Google and Microsoft block their sign-in pages inside the app, so connect in the system browser.
@@ -1453,6 +1472,17 @@ function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, email
           Delete account
         </button>
       </div>
+
+      {canRate && (
+        <button onClick={() => openStoreReview().catch(() => alert("Couldn't open the store. Try again."))} className="w-full bg-white border border-gray-100 rounded-2xl p-4 mb-3 flex items-center gap-3 text-left hover:bg-gray-50 transition-colors">
+          <span className="text-lg">⭐</span>
+          <div className="flex-1">
+            <p className="text-sm font-medium">Rate TaxSnap</p>
+            <p className="text-xs text-gray-500">A quick review helps other drivers and freelancers find it.</p>
+          </div>
+          <span className="text-gray-300">›</span>
+        </button>
+      )}
 
       {isNative && (
         <div className="bg-white border border-gray-100 rounded-2xl p-4 mb-3">
