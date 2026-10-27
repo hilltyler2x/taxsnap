@@ -92,17 +92,29 @@ model Receipt {
 }
 
 model Trip {
-  id         String   @id @default(cuid())
-  userId     String
-  purpose    String
+  id          String    @id @default(cuid())
+  userId      String
+  purpose     String
   destination String
-  odoStart   Int
-  odoEnd     Int
-  miles      Int
-  date       DateTime
-  deductible Float
-  createdAt  DateTime @default(now())
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Odometer readings are optional: trips can also be entered as plain miles or measured by GPS.
+  odoStart    Int?
+  odoEnd      Int?
+  miles       Float
+  date        DateTime
+  deductible  Float
+  source      String    @default("odometer") // odometer | manual | gps | auto
+  startPlace  String?
+  startLat    Float?
+  startLng    Float?
+  endLat      Float?
+  endLng      Float?
+  startedAt   DateTime?
+  endedAt     DateTime?
+  // Drives detected by automatic tracking wait here until the user marks them business
+  // (adds a purpose) or deletes them as personal. They don't count toward totals or exports.
+  needsReview Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model EmailToken {

@@ -81,6 +81,14 @@
 	<string>TaxSnap lets you pick receipt photos from your library so it can read the merchant, date and amount for your tax records.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>TaxSnap can save receipt photos to your library.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>TaxSnap uses your location to measure the miles of a business trip you start, like a client meeting or an inventory run, so you can deduct them at the IRS mileage rate.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>If you turn on automatic trips, TaxSnap uses your location in the background to notice when you drive and log the miles while your phone is locked. You review each drive and only business trips are deducted. You can turn this off in TaxSnap's Account settings.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 </dict>

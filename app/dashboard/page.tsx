@@ -2,8 +2,9 @@
 import { useUser, useClerk } from "@clerk/nextjs"
 import { useEffect, useState, useRef } from "react"
 import toast from "react-hot-toast"
-import { calcDeductible, IRS_MILEAGE_RATE, CATEGORIES, BUSINESS_PURPOSES } from "@/lib/irs"
+import { calcDeductible, IRS_MILEAGE_RATE, mileageRateFor, CATEGORIES, BUSINESS_PURPOSES } from "@/lib/irs"
 import { usePlatform, takeReceiptPhoto, hapticSuccess, saveOrShareFile, openInSystemBrowser, openSignedLink } from "@/lib/native"
+import { tripTracker, tripMiles, localDay, placeName, type TrackerState } from "@/lib/tripTracker"
 
 const CC: Record<string, string> = {
   Travel: "#1D9E75", Meals: "#BA7517", Office: "#185FA5",
@@ -48,6 +49,23 @@ function errMsg(err: any, fallback: string): string {
   return fallback
 }
 
+// Trip form -> API body. Miles come from either odometer readings or a typed-in number.
+function tripBody(f: any) {
+  const base = { purpose: f.purpose, destination: f.destination, date: f.date, startPlace: f.startPlace || null }
+  if (f.useOdo) return { ...base, odoStart: parseInt(f.odoStart), odoEnd: parseInt(f.odoEnd), miles: null, source: "odometer" }
+  const source = f.source && f.source !== "odometer" ? f.source : "manual"
+  return { ...base, miles: parseFloat(f.miles), odoStart: null, odoEnd: null, source }
+}
+
+function formMiles(f: any): number {
+  if (f.useOdo) {
+    const m = parseInt(f.odoEnd) - parseInt(f.odoStart)
+    return isNaN(m) ? 0 : m
+  }
+  const m = parseFloat(f.miles)
+  return isNaN(m) ? 0 : Math.round(m * 10) / 10
+}
+
 export default function Dashboard() {
   const { isLoaded, isSignedIn, user: clerkUser } = useUser()
   const { signOut } = useClerk()
@@ -55,6 +73,9 @@ export default function Dashboard() {
   const [tab, setTab] = useState<Tab>("home")
   const [receipts, setReceipts] = useState<any[]>([])
   const [trips, setTrips] = useState<any[]>([])
+  const [toReview, setToReview] = useState<any[]>([])
+  const [tracker, setTracker] = useState<TrackerState | null>(null)
+  const [showLocationAsk, setShowLocationAsk] = useState(false)
   const [emails, setEmails] = useState<any[]>([])
   const [emailConnected, setEmailConnected] = useState<string[]>([])
   const [emailsLoading, setEmailsLoading] = useState(false)
@@ -117,6 +138,22 @@ export default function Dashboard() {
     if (tab === "account" && isPro) fetchEmails()
   }, [tab, isPro])
 
+  // GPS trips. Every phone-app user who can log mileage is asked once about automatic
+  // trips ("Always" location); the answer can be changed any time in Account settings.
+  useEffect(() => tripTracker.subscribe(setTracker), [])
+  useEffect(() => {
+    if (!me) return
+    tripTracker.init({ allowed: isPro, onAutoSaved: fetchTrips })
+    if (isNative && isPro && !tripTracker.hasAsked()) setShowLocationAsk(true)
+  }, [me, isPro, isNative])
+
+  const answerLocationAsk = async (on: boolean) => {
+    tripTracker.markAsked()
+    setShowLocationAsk(false)
+    await tripTracker.setAutoEnabled(on)
+    if (on) toast.success("Automatic trips are on. Pick \"Always\" when your phone asks.")
+  }
+
   const fetchMe = async () => {
     const res = await fetch("/api/me")
     if (res.ok) setMe(await res.json())
@@ -129,7 +166,11 @@ export default function Dashboard() {
 
   const fetchTrips = async () => {
     const res = await fetch("/api/trips")
-    if (res.ok) setTrips((await res.json()).trips)
+    if (res.ok) {
+      const data = await res.json()
+      setTrips(data.trips)
+      setToReview(data.toReview ?? [])
+    }
   }
 
   const disconnectEmail = async (provider: string) => {
@@ -298,24 +339,57 @@ export default function Dashboard() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     })
-    if (res.ok) { toast.success("Trip logged!"); fetchTrips() }
-    else { const e = await res.json(); toast.error(errMsg(e, "Failed")) }
+    if (res.ok) { toast.success("Trip logged!"); fetchTrips(); return true }
+    const e = await res.json(); toast.error(errMsg(e, "Failed")); return false
   }
 
   const openEditTrip = (t: any) => {
     setEditingTrip(t)
-    setEditTripForm({ ...t, date: new Date(t.date).toISOString().split("T")[0], odoStart: String(t.odoStart), odoEnd: String(t.odoEnd) })
+    setEditTripForm({
+      ...t,
+      date: new Date(t.date).toISOString().split("T")[0],
+      useOdo: t.odoStart != null && t.odoEnd != null,
+      odoStart: t.odoStart != null ? String(t.odoStart) : "",
+      odoEnd: t.odoEnd != null ? String(t.odoEnd) : "",
+      miles: String(t.miles),
+    })
+  }
+
+  const startTrip = async () => {
+    await tripTracker.startTrip()
+    hapticSuccess()
+  }
+
+  // End trip: open the save form with the measured miles and where you ended up.
+  const endTrip = async () => {
+    const done = await tripTracker.endTrip()
+    if (!done) return
+    if (done.miles < 0.1) { toast("That trip was under 0.1 miles, so it wasn't saved."); return }
+    hapticSuccess()
+    const form = {
+      purpose: "", destination: "", startPlace: "", date: localDay(new Date(done.startedAt).getTime()),
+      useOdo: false, odoStart: "", odoEnd: "", miles: String(done.miles), source: "gps", gps: done,
+    }
+    setEditingTrip({ id: null, source: "gps" })
+    setEditTripForm(form)
+    const [from, to] = await Promise.all([placeName(done.startLat, done.startLng), placeName(done.endLat, done.endLng)])
+    setEditTripForm((f: any) => f && f.gps === done ? { ...f, startPlace: f.startPlace || from || "", destination: f.destination || to || "" } : f)
   }
 
   const saveTripEdit = async () => {
     if (!editTripForm || !editingTrip) return
+    const body = tripBody(editTripForm)
+    if (!editingTrip.id) {
+      if (await saveTrip({ ...body, ...editTripForm.gps, miles: body.miles })) { setEditingTrip(null); setEditTripForm(null) }
+      return
+    }
     const res = await fetch(`/api/trips/${editingTrip.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...editTripForm, odoStart: parseInt(editTripForm.odoStart), odoEnd: parseInt(editTripForm.odoEnd) }),
+      body: JSON.stringify(body),
     })
     if (res.ok) {
-      toast.success("Trip updated!")
+      toast.success(editingTrip.needsReview ? "Saved as a business trip!" : "Trip updated!")
       setEditingTrip(null)
       setEditTripForm(null)
       fetchTrips()
@@ -325,8 +399,16 @@ export default function Dashboard() {
     }
   }
 
+  // A trip that just ended isn't saved yet, so don't lose its miles to a stray tap.
+  const closeTripModal = () => {
+    if (editingTrip && !editingTrip.id && !confirm("Discard this trip? Its miles won't be saved.")) return
+    setEditingTrip(null)
+    setEditTripForm(null)
+  }
+
   const deleteTripEdit = async () => {
     if (!editingTrip) return
+    if (!editingTrip.id) { closeTripModal(); return }
     const res = await fetch(`/api/trips/${editingTrip.id}`, { method: "DELETE" })
     if (res.ok) {
       toast.success("Trip deleted")
@@ -691,7 +773,7 @@ export default function Dashboard() {
         {tab === "miles" && (
           !isPro
             ? <LockScreen icon="🚗" title="Mileage tracking is Pro" sub={isIOS ? "Log IRS-compliant trips with destination and odometer readings with TaxSnap Pro." : "Log IRS-compliant trips with destination and odometer readings. Upgrade to Pro for $5/month."} onUpgrade={isIOS ? undefined : () => setTab("account")} />
-            : <MilesTab trips={trips} onSave={saveTrip} onDestInput={onDestInput} suggestions={destSuggestions} onSelectDest={() => setDestSuggestions([])} onEditTrip={openEditTrip} />
+            : <MilesTab trips={trips} toReview={toReview} tracker={tracker} onStartTrip={startTrip} onEndTrip={endTrip} onCancelTrip={() => tripTracker.cancelTrip()} onOpenLocationSettings={() => tripTracker.openSettings()} isNative={isNative} onSave={saveTrip} onDestInput={onDestInput} suggestions={destSuggestions} onSelectDest={() => setDestSuggestions([])} onEditTrip={openEditTrip} />
         )}
 
         {/* TAXES */}
@@ -729,9 +811,33 @@ export default function Dashboard() {
             isNative={isNative}
             isIOS={isIOS}
             onDeleteAccount={deleteAccount}
+            tracker={tracker}
+            onToggleAutoTrips={(on: boolean) => { tripTracker.markAsked(); tripTracker.setAutoEnabled(on) }}
+            onOpenLocationSettings={() => tripTracker.openSettings()}
           />
         )}
       </div>
+
+      {/* Ask about automatic trips (phone app, once per phone) */}
+      {showLocationAsk && (
+        <div className="fixed inset-0 bg-black/40 z-30 flex items-end sm:items-center justify-center p-3 modal-safe">
+          <div className="w-full max-w-lg bg-white rounded-2xl p-5">
+            <p className="text-3xl mb-2">🚗</p>
+            <p className="font-medium mb-2">Log business miles automatically?</p>
+            <p className="text-sm text-gray-600 leading-relaxed mb-2">
+              Every business mile is worth ${mileageRateFor(new Date().getFullYear())} off your taxes. TaxSnap can notice when you drive and save each drive for you to review. You mark it business, like a meetup or an inventory run, or delete it as personal.
+            </p>
+            <p className="text-sm text-gray-600 leading-relaxed mb-4">
+              {isIOS
+                ? <>To keep logging while your phone is locked, choose <b>Allow While Using App</b> and then <b>Change to Always Allow</b> when your iPhone asks.</>
+                : <>To keep logging while your phone is in your pocket, allow location, and TaxSnap will show a notification while it tracks.</>}
+              {" "}Your location is only used to measure trips, never sold or shared. You can turn this off any time in Account, Trip tracking.
+            </p>
+            <button onClick={() => answerLocationAsk(true)} className="w-full bg-emerald-500 text-white py-2.5 rounded-xl text-sm font-medium mb-2">Turn on automatic trips</button>
+            <button onClick={() => answerLocationAsk(false)} className="w-full py-2.5 rounded-xl border border-gray-200 text-sm text-gray-600">Not now, I'll use Start trip</button>
+          </div>
+        </div>
+      )}
 
       {/* Edit receipt modal */}
       {editingReceipt && editForm && (
@@ -752,13 +858,16 @@ export default function Dashboard() {
 
       {/* Edit trip modal */}
       {editingTrip && editTripForm && (
-        <div className="fixed inset-0 bg-black/40 z-20 flex items-end sm:items-center justify-center p-3 modal-safe" onClick={() => { setEditingTrip(null); setEditTripForm(null) }}>
+        <div className="fixed inset-0 bg-black/40 z-20 flex items-end sm:items-center justify-center p-3 modal-safe" onClick={closeTripModal}>
           <div className="w-full max-w-lg max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <TripEditForm
+              title={editingTrip.needsReview ? "Was this a business drive?" : editingTrip.id ? "Edit trip" : "Save your trip"}
+              deleteLabel={editingTrip.needsReview ? "Personal drive, delete it" : editingTrip.id ? "Delete trip" : "Discard trip"}
+              saveLabel={editingTrip.needsReview ? "✓ Business trip, save it" : editingTrip.id ? "✓ Save changes" : "✓ Save trip"}
               form={editTripForm}
               onChange={setEditTripForm}
               onSave={saveTripEdit}
-              onDiscard={() => { setEditingTrip(null); setEditTripForm(null) }}
+              onDiscard={closeTripModal}
               onDelete={deleteTripEdit}
               onDestInput={onDestInput}
               suggestions={destSuggestions}
@@ -972,21 +1081,147 @@ function LockScreen({ icon, title, sub, onUpgrade }: any) {
   )
 }
 
-function MilesTab({ trips, onSave, onDestInput, suggestions, onSelectDest, onEditTrip }: any) {
-  const [form, setForm] = useState({ purpose: "", destination: "", odoStart: "", odoEnd: "", date: todayLocalISO() })
-  const miles = parseInt(form.odoEnd) - parseInt(form.odoStart)
-  const ded = isNaN(miles) || miles <= 0 ? 0 : miles * IRS_MILEAGE_RATE
-  const totalMiles = trips.reduce((s: number, t: any) => s + t.miles, 0)
+// Miles for a trip: typed in, or odometer start and end. Shared by the new-trip and edit forms.
+function MilesFields({ form, onChange }: any) {
+  const miles = formMiles(form)
+  const rate = mileageRateFor(parseInt(form.date) || new Date().getFullYear())
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5 text-xs">
+        {[{ odo: false, label: "Miles" }, { odo: true, label: "Odometer" }].map(o => (
+          <button key={o.label} type="button" onClick={() => onChange({ ...form, useOdo: o.odo })}
+            className={`flex-1 py-1.5 rounded-md ${!!form.useOdo === o.odo ? "bg-white font-medium shadow-sm" : "text-gray-500"}`}>{o.label}</button>
+        ))}
+      </div>
+      {form.useOdo ? (
+        <div className="grid grid-cols-2 gap-2">
+          <div><label className="text-xs text-gray-500 block mb-1">Odo start *</label><input type="number" inputMode="numeric" value={form.odoStart} onChange={(e: any) => onChange({ ...form, odoStart: e.target.value })} placeholder="42100" className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2" /></div>
+          <div><label className="text-xs text-gray-500 block mb-1">Odo end *</label><input type="number" inputMode="numeric" value={form.odoEnd} onChange={(e: any) => onChange({ ...form, odoEnd: e.target.value })} placeholder="42134" className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2" /></div>
+        </div>
+      ) : (
+        <div><label className="text-xs text-gray-500 block mb-1">Miles driven *</label><input type="number" inputMode="decimal" step="0.1" min="0" value={form.miles} onChange={(e: any) => onChange({ ...form, miles: e.target.value })} placeholder="e.g. 12.5 (round trip)" className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2" /></div>
+      )}
+      {miles > 0 && <p className="text-xs text-blue-600 font-medium">{miles} miles · ${(miles * rate).toFixed(2)} deductible at ${rate}/mi</p>}
+    </div>
+  )
+}
+
+function DestinationField({ value, onValue, onDestInput, suggestions, onSelectDest }: any) {
+  return (
+    <div className="relative">
+      <label className="text-xs text-gray-500 block mb-1">Destination *</label>
+      <input value={value} onChange={(e: any) => { onValue(e.target.value); onDestInput(e.target.value) }}
+        placeholder="Start typing an address..." className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2" autoComplete="off" />
+      {suggestions.length > 0 && (
+        <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl overflow-hidden z-10 shadow-sm">
+          {suggestions.map((s: any, i: number) => (
+            <button key={i} className="w-full text-left px-3 py-2.5 hover:bg-gray-50 border-b border-gray-50 last:border-0 block"
+              onMouseDown={() => { onValue(s.label); onSelectDest() }}>
+              <p className="text-xs font-medium">📍 {s.label}</p>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function elapsed(fromMs: number) {
+  const mins = Math.max(0, Math.floor((Date.now() - fromMs) / 60000))
+  return mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)} h ${mins % 60} min`
+}
+
+function TripTrackerCard({ tracker, onStartTrip, onEndTrip, onCancelTrip, onOpenLocationSettings, isNative }: any) {
+  const [, tick] = useState(0)
+  useEffect(() => { const t = setInterval(() => tick(n => n + 1), 30000); return () => clearInterval(t) }, [])
+  const active = tracker?.active
+  const manual = active?.mode === "manual"
+  return (
+    <div className={`rounded-2xl p-4 mb-3 border ${manual ? "bg-emerald-50 border-emerald-200" : "bg-white border-gray-100"}`}>
+      {manual ? (
+        <>
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <p className="text-xs text-emerald-700 font-medium">● Trip in progress</p>
+              <p className="text-2xl font-medium text-emerald-900">{tripMiles(active).toFixed(1)} mi</p>
+              <p className="text-xs text-emerald-700">{elapsed(active.startedAt)} · ${(tripMiles(active) * IRS_MILEAGE_RATE).toFixed(2)} so far</p>
+            </div>
+            <span className="text-3xl">🚗</span>
+          </div>
+          <button onClick={onEndTrip} className="w-full bg-emerald-600 text-white py-3 rounded-xl text-sm font-medium">End trip</button>
+          <button onClick={() => { if (confirm("Cancel this trip without saving it?")) onCancelTrip() }} className="w-full mt-2 text-xs text-gray-500">Cancel trip</button>
+          {!isNative && <p className="text-xs text-gray-500 mt-2">Keep this page open while you drive. The TaxSnap phone app can track with the screen off.</p>}
+        </>
+      ) : (
+        <>
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <p className="text-sm font-medium">Track a trip with GPS</p>
+              <p className="text-xs text-gray-500">Tap Start when you leave and End when you arrive.</p>
+            </div>
+            <span className="text-2xl">📍</span>
+          </div>
+          <button onClick={onStartTrip} disabled={tracker?.starting} className="w-full bg-emerald-500 text-white py-3 rounded-xl text-sm font-medium disabled:opacity-60">
+            {tracker?.starting ? "Finding your location..." : "Start trip"}
+          </button>
+          {active?.mode === "auto" && <p className="text-xs text-blue-600 mt-2">Automatic trips noticed you driving ({tripMiles(active).toFixed(1)} mi so far). Tap Start to keep this drive as a trip now.</p>}
+          {tracker?.autoEnabled && !active && <p className="text-xs text-gray-400 mt-2">Automatic trips are on. Drives show up below for you to review.</p>}
+        </>
+      )}
+      {tracker?.error && (
+        <p className="text-xs text-red-600 mt-2">
+          {tracker.error}.{isNative && <> <button onClick={onOpenLocationSettings} className="underline">Open settings</button></>}
+        </p>
+      )}
+    </div>
+  )
+}
+
+const BLANK_TRIP = () => ({ purpose: "", destination: "", startPlace: "", useOdo: false, odoStart: "", odoEnd: "", miles: "", date: todayLocalISO() })
+
+function MilesTab({ trips, toReview, tracker, onStartTrip, onEndTrip, onCancelTrip, onOpenLocationSettings, isNative, onSave, onDestInput, suggestions, onSelectDest, onEditTrip }: any) {
+  const [form, setForm] = useState<any>(BLANK_TRIP)
+  const miles = formMiles(form)
+  const totalMiles = Math.round(trips.reduce((s: number, t: any) => s + t.miles, 0) * 10) / 10
+  const totalDed = trips.reduce((s: number, t: any) => s + (t.deductible ?? 0), 0)
+
+  const add = async () => {
+    if (!form.purpose) { toast.error("Pick a business purpose"); return }
+    if (!form.destination) { toast.error("Add a destination"); return }
+    if (miles <= 0) { toast.error(form.useOdo ? "Odometer end must be greater than start" : "Enter the miles you drove"); return }
+    if (await onSave(tripBody(form))) setForm({ ...BLANK_TRIP(), useOdo: form.useOdo })
+  }
 
   return (
     <div>
       <div className="grid grid-cols-2 gap-2 mb-3">
         <div className="bg-blue-50 rounded-xl p-3"><p className="text-xs text-blue-600 mb-1">Total miles</p><p className="text-xl font-medium text-blue-900">{totalMiles}</p><p className="text-xs text-blue-500">{new Date().getFullYear()} YTD</p></div>
-        <div className="bg-blue-50 rounded-xl p-3"><p className="text-xs text-blue-600 mb-1">IRS deduction</p><p className="text-xl font-medium text-blue-900">${Math.round(totalMiles * IRS_MILEAGE_RATE)}</p><p className="text-xs text-blue-500">at $0.67/mile</p></div>
+        <div className="bg-blue-50 rounded-xl p-3"><p className="text-xs text-blue-600 mb-1">IRS deduction</p><p className="text-xl font-medium text-blue-900">${Math.round(totalDed)}</p><p className="text-xs text-blue-500">at ${IRS_MILEAGE_RATE}/mile</p></div>
       </div>
 
+      <TripTrackerCard tracker={tracker} onStartTrip={onStartTrip} onEndTrip={onEndTrip} onCancelTrip={onCancelTrip} onOpenLocationSettings={onOpenLocationSettings} isNative={isNative} />
+
+      {toReview.length > 0 && (
+        <div className="mb-3">
+          <p className="text-sm font-medium mb-1">Drives to review</p>
+          <p className="text-xs text-gray-500 mb-2">Tap a drive to add its business purpose, or delete it if it was personal. Only business trips count toward your deduction.</p>
+          <div className="space-y-2">
+            {toReview.map((t: any) => (
+              <div key={t.id} onClick={() => onEditTrip(t)} className="bg-amber-50 border border-amber-200 rounded-xl p-3 cursor-pointer">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center text-sm flex-shrink-0">❓</div>
+                  <div className="flex-1 min-w-0"><p className="text-xs font-medium truncate">{t.destination || "Drive"}</p><p className="text-xs text-gray-500">{formatDateUTC(t.date, { month: "short", day: "numeric" })}{t.startedAt ? ` · ${new Date(t.startedAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}` : ""}</p></div>
+                  <p className="text-sm font-medium text-amber-700">{t.miles} mi</p>
+                </div>
+                {t.startPlace && <p className="text-xs text-gray-500 mt-1.5 pl-9 truncate">From {t.startPlace}</p>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="bg-white border border-gray-100 rounded-2xl p-4 mb-3 space-y-3">
-        <p className="text-sm font-medium">Log a trip</p>
+        <p className="text-sm font-medium">Enter a trip by hand</p>
         <div>
           <label className="text-xs text-gray-500 block mb-1">Business purpose *</label>
           <select value={form.purpose} onChange={e => setForm({ ...form, purpose: e.target.value })} className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white">
@@ -994,29 +1229,10 @@ function MilesTab({ trips, onSave, onDestInput, suggestions, onSelectDest, onEdi
             {BUSINESS_PURPOSES.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
         </div>
-        <div className="relative">
-          <label className="text-xs text-gray-500 block mb-1">Destination *</label>
-          <input value={form.destination} onChange={e => { setForm({ ...form, destination: e.target.value }); onDestInput(e.target.value) }}
-            placeholder="Start typing an address..." className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2" autoComplete="off" />
-          {suggestions.length > 0 && (
-            <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl overflow-hidden z-10 shadow-sm">
-              {suggestions.map((s: any, i: number) => (
-                <button key={i} className="w-full text-left px-3 py-2.5 hover:bg-gray-50 border-b border-gray-50 last:border-0 block"
-                  onMouseDown={() => { setForm({ ...form, destination: s.label }); onSelectDest() }}>
-                  <p className="text-xs font-medium">📍 {s.label}</p>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <div><label className="text-xs text-gray-500 block mb-1">Odo start *</label><input type="number" value={form.odoStart} onChange={e => setForm({ ...form, odoStart: e.target.value })} placeholder="42100" className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2" /></div>
-          <div><label className="text-xs text-gray-500 block mb-1">Odo end *</label><input type="number" value={form.odoEnd} onChange={e => setForm({ ...form, odoEnd: e.target.value })} placeholder="42134" className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2" /></div>
-        </div>
-        {miles > 0 && <p className="text-xs text-blue-600 font-medium">{miles} miles · ${ded.toFixed(2)} deductible</p>}
+        <DestinationField value={form.destination} onValue={(v: string) => setForm((f: any) => ({ ...f, destination: v }))} onDestInput={onDestInput} suggestions={suggestions} onSelectDest={onSelectDest} />
+        <MilesFields form={form} onChange={setForm} />
         <div><label className="text-xs text-gray-500 block mb-1">Date *</label><input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2" /></div>
-        <button onClick={() => { if (!form.purpose || !form.destination || !form.odoStart || !form.odoEnd || miles <= 0) return; onSave({ ...form, odoStart: parseInt(form.odoStart), odoEnd: parseInt(form.odoEnd) }); setForm({ purpose: "", destination: "", odoStart: "", odoEnd: "", date: todayLocalISO() }) }}
-          className="w-full bg-emerald-500 text-white py-2.5 rounded-xl text-sm font-medium">+ Add to log</button>
+        <button onClick={add} className="w-full bg-emerald-500 text-white py-2.5 rounded-xl text-sm font-medium">+ Add to log</button>
       </div>
 
       <p className="text-sm font-medium mb-2">Trip log</p>
@@ -1024,11 +1240,14 @@ function MilesTab({ trips, onSave, onDestInput, suggestions, onSelectDest, onEdi
         {trips.map((t: any) => (
           <div key={t.id} onClick={() => onEditTrip(t)} className="bg-white border border-gray-100 rounded-xl p-3 cursor-pointer hover:border-gray-300 transition-colors">
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center text-sm flex-shrink-0">🚗</div>
+              <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center text-sm flex-shrink-0">{t.source === "gps" || t.source === "auto" ? "📍" : "🚗"}</div>
               <div className="flex-1 min-w-0"><p className="text-xs font-medium truncate">{t.purpose}</p><p className="text-xs text-gray-400">{formatDateUTC(t.date, { month: "short", day: "numeric" })}</p></div>
               <div className="text-right"><p className="text-sm font-medium text-blue-600">{t.miles} mi</p><p className="text-xs text-emerald-600">${t.deductible?.toFixed(2)}</p></div>
             </div>
-            <p className="text-xs text-gray-400 mt-1.5 pl-9">📍 {t.destination} · 🔢 {t.odoStart?.toLocaleString()} → {t.odoEnd?.toLocaleString()}</p>
+            <p className="text-xs text-gray-400 mt-1.5 pl-9 truncate">
+              📍 {t.startPlace ? `${t.startPlace} → ` : ""}{t.destination}
+              {t.odoStart != null && t.odoEnd != null ? ` · 🔢 ${t.odoStart.toLocaleString()} → ${t.odoEnd.toLocaleString()}` : t.source === "gps" || t.source === "auto" ? " · GPS" : ""}
+            </p>
           </div>
         ))}
         {!trips.length && <p className="text-xs text-gray-400 text-center py-4">No trips logged yet</p>}
@@ -1037,16 +1256,11 @@ function MilesTab({ trips, onSave, onDestInput, suggestions, onSelectDest, onEdi
   )
 }
 
-function TripEditForm({ form, onChange, onSave, onDiscard, onDelete, onDestInput, suggestions, onSelectDest }: any) {
-  const odoStart = parseInt(form.odoStart)
-  const odoEnd = parseInt(form.odoEnd)
-  const miles = odoEnd - odoStart
-  const ded = isNaN(miles) || miles <= 0 ? 0 : miles * IRS_MILEAGE_RATE
-
+function TripEditForm({ title, saveLabel, deleteLabel, form, onChange, onSave, onDiscard, onDelete, onDestInput, suggestions, onSelectDest }: any) {
   return (
     <div className="bg-white border-2 border-emerald-400 rounded-2xl p-4">
       <div className="flex items-center justify-between mb-3">
-        <p className="text-xs font-medium text-emerald-700">✦ Edit trip</p>
+        <p className="text-xs font-medium text-emerald-700">✦ {title}</p>
       </div>
       <div className="space-y-3">
         <div>
@@ -1056,33 +1270,18 @@ function TripEditForm({ form, onChange, onSave, onDiscard, onDelete, onDestInput
             {BUSINESS_PURPOSES.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
         </div>
-        <div className="relative">
-          <label className="text-xs text-gray-500 block mb-1">Destination *</label>
-          <input value={form.destination} onChange={(e: any) => { onChange({ ...form, destination: e.target.value }); onDestInput(e.target.value) }}
-            placeholder="Start typing an address..." className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2" autoComplete="off" />
-          {suggestions.length > 0 && (
-            <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl overflow-hidden z-10 shadow-sm">
-              {suggestions.map((s: any, i: number) => (
-                <button key={i} className="w-full text-left px-3 py-2.5 hover:bg-gray-50 border-b border-gray-50 last:border-0 block"
-                  onMouseDown={() => { onChange({ ...form, destination: s.label }); onSelectDest() }}>
-                  <p className="text-xs font-medium">📍 {s.label}</p>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <div><label className="text-xs text-gray-500 block mb-1">Odo start *</label><input type="number" value={form.odoStart} onChange={(e: any) => onChange({ ...form, odoStart: e.target.value })} className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2" /></div>
-          <div><label className="text-xs text-gray-500 block mb-1">Odo end *</label><input type="number" value={form.odoEnd} onChange={(e: any) => onChange({ ...form, odoEnd: e.target.value })} className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2" /></div>
-        </div>
-        {miles > 0 && <p className="text-xs text-blue-600 font-medium">{miles} miles · ${ded.toFixed(2)} deductible</p>}
+        {(form.startPlace || form.source === "gps" || form.source === "auto") && (
+          <div><label className="text-xs text-gray-500 block mb-1">Starting point</label><input value={form.startPlace ?? ""} onChange={(e: any) => onChange({ ...form, startPlace: e.target.value })} placeholder="Where the trip started" className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2" /></div>
+        )}
+        <DestinationField value={form.destination} onValue={(v: string) => onChange({ ...form, destination: v })} onDestInput={onDestInput} suggestions={suggestions} onSelectDest={onSelectDest} />
+        <MilesFields form={form} onChange={onChange} />
         <div><label className="text-xs text-gray-500 block mb-1">Date *</label><input type="date" value={form.date} onChange={(e: any) => onChange({ ...form, date: e.target.value })} className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2" /></div>
       </div>
       <div className="flex gap-2 mt-3">
         <button onClick={onDiscard} className="flex-1 py-2 rounded-xl border border-gray-200 text-xs text-gray-500">Discard</button>
-        <button onClick={onSave} className="flex-1 py-2 rounded-xl bg-emerald-500 text-white text-xs font-medium">✓ Save changes</button>
+        <button onClick={onSave} className="flex-1 py-2 rounded-xl bg-emerald-500 text-white text-xs font-medium">{saveLabel}</button>
       </div>
-      <button onClick={onDelete} className="w-full mt-2 py-2 rounded-xl border border-red-200 text-xs text-red-600">Delete trip</button>
+      <button onClick={onDelete} className="w-full mt-2 py-2 rounded-xl border border-red-200 text-xs text-red-600">{deleteLabel}</button>
     </div>
   )
 }
@@ -1214,7 +1413,7 @@ function TaxesTab({ receipts, trips, isPro, isIOS, onUpgrade }: any) {
   )
 }
 
-function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, emails, emailConnected, emailsLoading, importedEmails, onFetchEmails, onImportEmail, onDisconnectEmail, onCheckout, onSignOut, onCsvFile, onSheetUrl, importing, onBrowseSheets, sheetFiles, onPickSheetFile, onCloseSheetFiles, sheetTabs, onPickSheetTab, onCloseSheetTabs, isNative, isIOS, onDeleteAccount }: any) {
+function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, emails, emailConnected, emailsLoading, importedEmails, onFetchEmails, onImportEmail, onDisconnectEmail, onCheckout, onSignOut, onCsvFile, onSheetUrl, importing, onBrowseSheets, sheetFiles, onPickSheetFile, onCloseSheetFiles, sheetTabs, onPickSheetTab, onCloseSheetTabs, isNative, isIOS, onDeleteAccount, tracker, onToggleAutoTrips, onOpenLocationSettings }: any) {
   const [sheetUrlInput, setSheetUrlInput] = useState("")
   const csvRef = useRef<HTMLInputElement>(null)
   const proOnly = (feature: string) => alert(isIOS ? `${feature} is a Pro feature.` : `${feature} requires Pro. Upgrade in Account.`)
@@ -1254,6 +1453,31 @@ function AccountTab({ session, plan, isPro, billingCycle, onToggleBilling, email
           Delete account
         </button>
       </div>
+
+      {isNative && (
+        <div className="bg-white border border-gray-100 rounded-2xl p-4 mb-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium">Trip tracking</p>
+              <p className="text-xs text-gray-500">Automatic trips: log drives in the background for you to review.</p>
+            </div>
+            <button
+              role="switch"
+              aria-checked={!!tracker?.autoEnabled}
+              aria-label="Automatic trips"
+              onClick={() => isPro ? onToggleAutoTrips(!tracker?.autoEnabled) : proOnly("Mileage tracking")}
+              className={`w-11 h-6 rounded-full relative transition-colors border-none cursor-pointer flex-shrink-0 ${tracker?.autoEnabled ? "bg-emerald-500" : "bg-gray-200"}`}>
+              <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-all ${tracker?.autoEnabled ? "left-5" : "left-0.5"}`} />
+            </button>
+          </div>
+          <p className="text-xs text-gray-400 mt-2 leading-relaxed">
+            {isIOS ? "Needs location set to Always so it works with your phone locked." : "Needs location access. A notification shows while TaxSnap is tracking."}
+            {" "}Off means TaxSnap only uses location while you run a trip with Start trip.
+            {" "}<button onClick={onOpenLocationSettings} className="underline">Location settings</button>
+          </p>
+          {tracker?.error && <p className="text-xs text-red-600 mt-1">{tracker.error}.</p>}
+        </div>
+      )}
 
       {plan === "OWNER" && (
         <div className="bg-red-50 border border-red-100 rounded-2xl p-4 flex items-center gap-3 mb-3">

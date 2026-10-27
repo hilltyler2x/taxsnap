@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getCurrentUser } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
-import { IRS_MILEAGE_RATE } from "@/lib/irs"
+import { mileageRateFor } from "@/lib/irs"
 
 export async function GET(req: NextRequest) {
   const user = await getCurrentUser()
@@ -13,7 +13,8 @@ export async function GET(req: NextRequest) {
   const year = new URL(req.url).searchParams.get("year") ?? new Date().getFullYear().toString()
   const [receipts, trips] = await Promise.all([
     prisma.receipt.findMany({ where: { userId, date: { gte: new Date(`${year}-01-01`), lte: new Date(`${year}-12-31`) } }, orderBy: { date: "asc" } }),
-    prisma.trip.findMany({ where: { userId, date: { gte: new Date(`${year}-01-01`), lte: new Date(`${year}-12-31`) } }, orderBy: { date: "asc" } }),
+    // Auto-detected drives the user hasn't confirmed as business stay out of the tax export.
+    prisma.trip.findMany({ where: { userId, needsReview: false, date: { gte: new Date(`${year}-01-01`), lte: new Date(`${year}-12-31`) } }, orderBy: { date: "asc" } }),
   ])
 
   const rows: string[][] = [["Type","Date","Vendor","Place","Purpose","Category","Amount","Deductible","Notes","Attendees","Odo Start","Odo End","Audit Flag","Audit Note"]]
@@ -21,7 +22,11 @@ export async function GET(req: NextRequest) {
     const att = Array.isArray(r.attendees) ? (r.attendees as any[]).map((a:any) => `${a.name} (${a.relationship})`).join("; ") : ""
     rows.push(["Receipt", r.date.toISOString().split("T")[0], r.name, r.place ?? "", r.purpose ?? "", r.category, r.amount.toFixed(2), (r.deductible ?? 0).toFixed(2), r.notes ?? "", att, "", "", r.auditFlag ? "Yes" : "No", r.auditNote ?? ""])
   })
-  trips.forEach(t => rows.push(["Mileage", t.date.toISOString().split("T")[0], "", t.destination, t.purpose, "Travel", (t.miles * IRS_MILEAGE_RATE).toFixed(2), t.deductible.toFixed(2), "", "", t.odoStart.toString(), t.odoEnd.toString(), "No", ""]))
+  const howMeasured: Record<string, string> = { odometer: "Odometer", manual: "Entered by hand", gps: "GPS trip", auto: "GPS trip (automatic)" }
+  trips.forEach(t => {
+    const notes = [`${t.miles} mi @ $${mileageRateFor(t.date.getUTCFullYear())}/mi`, howMeasured[t.source] ?? t.source, t.startPlace ? `From ${t.startPlace}` : ""].filter(Boolean).join(" · ")
+    rows.push(["Mileage", t.date.toISOString().split("T")[0], "", t.destination, t.purpose, "Travel", t.deductible.toFixed(2), t.deductible.toFixed(2), notes, "", t.odoStart?.toString() ?? "", t.odoEnd?.toString() ?? "", "No", ""])
+  })
 
   const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n")
   return new NextResponse(csv, { headers: { "Content-Type": "text/csv", "Content-Disposition": `attachment; filename="taxsnap_${year}.csv"` } })
