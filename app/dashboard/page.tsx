@@ -47,12 +47,20 @@ function errMsg(err: any, fallback: string): string {
   return fallback
 }
 
+// Home expenses are only deductible at the business-use share of the home, so a Home
+// receipt saved without homePct silently counts as $0 — make the user answer it first.
+function missingHomePct(form: any): boolean {
+  return form?.category === "Home" && !(typeof form.homePct === "number" && form.homePct > 0 && form.homePct <= 100)
+}
+
 export default function Dashboard() {
   const { isLoaded, isSignedIn, user: clerkUser } = useUser()
   const { signOut } = useClerk()
   const [me, setMe] = useState<{ plan: string; isOwner: boolean } | null>(null)
   const [tab, setTab] = useState<Tab>("home")
   const [receipts, setReceipts] = useState<any[]>([])
+  // Receipts come back newest-first, so this is the % from the user's latest Home expense.
+  const lastHomePct: number | undefined = receipts.find(r => r.category === "Home" && r.homePct > 0)?.homePct
   const [trips, setTrips] = useState<any[]>([])
   const [emails, setEmails] = useState<any[]>([])
   const [emailConnected, setEmailConnected] = useState<string[]>([])
@@ -219,6 +227,7 @@ export default function Dashboard() {
 
   const saveReceipt = async () => {
     if (!scanForm) return
+    if (missingHomePct(scanForm)) { toast.error("Enter your home office % before saving a Home expense"); return }
     const res = await fetch("/api/receipts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -243,6 +252,7 @@ export default function Dashboard() {
 
   const saveReceiptEdit = async () => {
     if (!editForm || !editingReceipt) return
+    if (missingHomePct(editForm)) { toast.error("Enter your home office % before saving a Home expense"); return }
     const res = await fetch(`/api/receipts/${editingReceipt.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -335,6 +345,7 @@ export default function Dashboard() {
 
   const confirmEmailImport = async () => {
     if (!emailDraft || !emailDraftForm) return
+    if (missingHomePct(emailDraftForm)) { toast.error("Enter your home office % before saving a Home expense"); return }
     const res = await fetch("/api/receipts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -610,6 +621,7 @@ export default function Dashboard() {
                 note={scanNote}
                 onChange={setScanForm}
                 onSave={saveReceipt}
+                defaultHomePct={lastHomePct}
                 onDiscard={() => { setScanState("idle"); setScanForm(null) }}
               />
             )}
@@ -700,6 +712,7 @@ export default function Dashboard() {
               note="Edit receipt details"
               onChange={setEditForm}
               onSave={saveReceiptEdit}
+              defaultHomePct={lastHomePct}
               onDiscard={() => { setEditingReceipt(null); setEditForm(null) }}
               onDelete={deleteReceiptEdit}
               saveLabel="✓ Save changes"
@@ -735,6 +748,7 @@ export default function Dashboard() {
               note="Found in inbox — review and confirm"
               onChange={setEmailDraftForm}
               onSave={confirmEmailImport}
+              defaultHomePct={lastHomePct}
               onDiscard={() => { setEmailDraft(null); setEmailDraftForm(null) }}
               saveLabel="✓ Import"
             />
@@ -826,7 +840,7 @@ function ReceiptCard({ r, onClick }: { r: any; onClick?: () => void }) {
   )
 }
 
-function ScanConfirmForm({ form, note, onChange, onSave, onDiscard, onDelete, saveLabel }: any) {
+function ScanConfirmForm({ form, note, onChange, onSave, onDiscard, onDelete, saveLabel, defaultHomePct }: any) {
   const ded = calcDeductible(form.amount ?? 0, form.category ?? "Other", form.homePct)
   return (
     <div className="mb-3">
@@ -868,7 +882,12 @@ function ScanConfirmForm({ form, note, onChange, onSave, onDiscard, onDelete, sa
         ))}
         <div className="flex justify-between items-center py-1.5 border-b border-gray-100">
           <span className="text-xs text-gray-500">Category *</span>
-          <select value={form.category ?? "Other"} onChange={e => onChange({ ...form, category: e.target.value })}
+          <select value={form.category ?? "Other"} onChange={e => onChange({
+            ...form,
+            category: e.target.value,
+            // Most people use the same office every time — carry their last % forward.
+            ...(e.target.value === "Home" && form.homePct == null && defaultHomePct ? { homePct: defaultHomePct } : {}),
+          })}
             className="text-xs font-medium bg-transparent border-none outline-none cursor-pointer">
             {CATEGORIES.map(c => <option key={c}>{c}</option>)}
           </select>
@@ -894,13 +913,7 @@ function ScanConfirmForm({ form, note, onChange, onSave, onDiscard, onDelete, sa
           </div>
         )}
         {form.category === "Home" && (
-          <div className="bg-green-50 rounded-lg p-3 my-2">
-            <p className="text-xs font-medium text-green-700 mb-2">🏠 Home office sq ft (IRS required)</p>
-            <div className="grid grid-cols-2 gap-2">
-              <div><label className="text-xs text-gray-500">Office sq ft</label><input type="number" className="w-full text-xs border border-gray-200 rounded px-2 py-1" value={form.officeSqft ?? ""} onChange={e => onChange({ ...form, officeSqft: parseFloat(e.target.value) })} /></div>
-              <div><label className="text-xs text-gray-500">Total home sq ft</label><input type="number" className="w-full text-xs border border-gray-200 rounded px-2 py-1" value={form.homeSqft ?? ""} onChange={e => onChange({ ...form, homeSqft: parseFloat(e.target.value), homePct: form.officeSqft ? Math.round(form.officeSqft / parseFloat(e.target.value) * 100) : 0 })} /></div>
-            </div>
-          </div>
+          <HomeOfficeFields form={form} onChange={onChange} defaultHomePct={defaultHomePct} />
         )}
         <div className="flex justify-between items-center pt-2">
           <span className="text-xs text-gray-500">Deductible</span>
@@ -914,6 +927,44 @@ function ScanConfirmForm({ form, note, onChange, onSave, onDiscard, onDelete, sa
           <button onClick={onDelete} className="w-full mt-2 py-2 rounded-xl border border-red-200 text-xs text-red-600">Delete receipt</button>
         )}
         <p className="text-xs text-gray-400 text-center mt-2">* Required by IRS for audit protection</p>
+      </div>
+    </div>
+  )
+}
+
+function HomeOfficeFields({ form, onChange, defaultHomePct }: any) {
+  const pct = typeof form.homePct === "number" && !isNaN(form.homePct) ? form.homePct : null
+  const missing = missingHomePct(form)
+  // Either sq ft box can be filled first; recompute whenever both are present.
+  const setSqft = (key: "officeSqft" | "homeSqft", raw: string) => {
+    const next = { ...form, [key]: raw === "" ? undefined : parseFloat(raw) }
+    if (next.officeSqft > 0 && next.homeSqft > 0) {
+      next.homePct = Math.min(100, Math.round((next.officeSqft / next.homeSqft) * 1000) / 10)
+    }
+    onChange(next)
+  }
+  return (
+    <div className={`rounded-lg p-3 my-2 ${missing ? "bg-amber-50 border border-amber-200" : "bg-green-50"}`}>
+      <p className={`text-xs font-medium mb-1 ${missing ? "text-amber-700" : "text-green-700"}`}>🏠 What % of your home is used for business?</p>
+      <p className="text-xs text-gray-500 mb-2">The IRS lets you deduct only the business-use share of rent, utilities and other home costs. Without it this receipt deducts $0.</p>
+      <div className="flex items-center gap-2 mb-2">
+        <input
+          type="number" min={0} max={100} step="0.1" inputMode="decimal" placeholder="e.g. 12"
+          className="w-24 text-xs border border-gray-200 rounded px-2 py-1"
+          value={pct ?? ""}
+          onChange={e => onChange({ ...form, homePct: e.target.value === "" ? null : Math.min(100, Math.max(0, parseFloat(e.target.value))) })}
+        />
+        <span className="text-xs text-gray-500">% business use</span>
+        {defaultHomePct && pct !== defaultHomePct && (
+          <button type="button" onClick={() => onChange({ ...form, homePct: defaultHomePct })} className="ml-auto text-xs text-emerald-700 underline">
+            Use {defaultHomePct}% (last time)
+          </button>
+        )}
+      </div>
+      <p className="text-xs text-gray-400 mb-1">Or figure it from square footage:</p>
+      <div className="grid grid-cols-2 gap-2">
+        <div><label className="text-xs text-gray-500">Office sq ft</label><input type="number" min={0} className="w-full text-xs border border-gray-200 rounded px-2 py-1" value={form.officeSqft ?? ""} onChange={e => setSqft("officeSqft", e.target.value)} /></div>
+        <div><label className="text-xs text-gray-500">Total home sq ft</label><input type="number" min={0} className="w-full text-xs border border-gray-200 rounded px-2 py-1" value={form.homeSqft ?? ""} onChange={e => setSqft("homeSqft", e.target.value)} /></div>
       </div>
     </div>
   )

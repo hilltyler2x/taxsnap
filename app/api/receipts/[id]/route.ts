@@ -12,7 +12,7 @@ const ReceiptUpdateSchema = z.object({
   place: z.string().nullable().optional(),
   purpose: z.string().nullable().optional(),
   notes: z.string().nullable().optional(),
-  homePct: z.number().nullable().optional(),
+  homePct: z.number().min(0).max(100).nullable().optional(),
   attendees: z.any().optional(),
   auditFlag: z.boolean().nullable().optional(),
   auditNote: z.string().nullable().optional(),
