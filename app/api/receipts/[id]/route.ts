@@ -18,11 +18,12 @@ const ReceiptUpdateSchema = z.object({
   auditNote: z.string().nullable().optional(),
 })
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const existing = await prisma.receipt.findUnique({ where: { id: params.id } })
+  const existing = await prisma.receipt.findUnique({ where: { id } })
   if (!existing || existing.userId !== user.id) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
   const body = await req.json()
@@ -30,8 +31,23 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
 
   const data = parsed.data
+  // Same rule as create: an edit that turns this receipt into an exact copy of another one
+  // (same name case-insensitive + date + amount) would double-count the deduction.
+  const dupe = await prisma.receipt.findFirst({
+    where: {
+      userId: user.id,
+      id: { not: id },
+      amount: data.amount,
+      date: new Date(data.date),
+      name: { equals: data.name.trim(), mode: "insensitive" },
+    },
+  })
+  if (dupe) {
+    return NextResponse.json({ error: "Duplicate receipt — another entry with the same name, date, and amount already exists." }, { status: 409 })
+  }
+
   const receipt = await prisma.receipt.update({
-    where: { id: params.id },
+    where: { id },
     data: {
       name: data.name,
       amount: data.amount,
@@ -50,13 +66,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   return NextResponse.json({ receipt })
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const existing = await prisma.receipt.findUnique({ where: { id: params.id } })
+  const existing = await prisma.receipt.findUnique({ where: { id } })
   if (!existing || existing.userId !== user.id) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
-  await prisma.receipt.delete({ where: { id: params.id } })
+  await prisma.receipt.delete({ where: { id } })
   return NextResponse.json({ ok: true })
 }
