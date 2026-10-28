@@ -2,7 +2,7 @@
 import { useUser, useClerk } from "@clerk/nextjs"
 import { useEffect, useState, useRef } from "react"
 import toast from "react-hot-toast"
-import { calcDeductible, IRS_MILEAGE_RATE, CATEGORIES, BUSINESS_PURPOSES } from "@/lib/irs"
+import { calcDeductible, calcMileageDeductible, IRS_MILEAGE_RATE, CATEGORIES, BUSINESS_PURPOSES } from "@/lib/irs"
 
 const CC: Record<string, string> = {
   Travel: "#1D9E75", Meals: "#BA7517", Office: "#185FA5",
@@ -933,14 +933,14 @@ function LockScreen({ icon, title, sub, onUpgrade }: any) {
 function MilesTab({ trips, onSave, onDestInput, suggestions, onSelectDest, onEditTrip }: any) {
   const [form, setForm] = useState({ purpose: "", destination: "", odoStart: "", odoEnd: "", date: todayLocalISO() })
   const miles = parseInt(form.odoEnd) - parseInt(form.odoStart)
-  const ded = isNaN(miles) || miles <= 0 ? 0 : miles * IRS_MILEAGE_RATE
+  const ded = isNaN(miles) || miles <= 0 || !form.date ? 0 : calcMileageDeductible(miles, form.date)
   const totalMiles = trips.reduce((s: number, t: any) => s + t.miles, 0)
 
   return (
     <div>
       <div className="grid grid-cols-2 gap-2 mb-3">
         <div className="bg-blue-50 rounded-xl p-3"><p className="text-xs text-blue-600 mb-1">Total miles</p><p className="text-xl font-medium text-blue-900">{totalMiles}</p><p className="text-xs text-blue-500">{new Date().getFullYear()} YTD</p></div>
-        <div className="bg-blue-50 rounded-xl p-3"><p className="text-xs text-blue-600 mb-1">IRS deduction</p><p className="text-xl font-medium text-blue-900">${Math.round(totalMiles * IRS_MILEAGE_RATE)}</p><p className="text-xs text-blue-500">at $0.67/mile</p></div>
+        <div className="bg-blue-50 rounded-xl p-3"><p className="text-xs text-blue-600 mb-1">IRS deduction</p><p className="text-xl font-medium text-blue-900">${Math.round(trips.reduce((s: number, t: any) => s + (t.deductible ?? 0), 0))}</p><p className="text-xs text-blue-500">now ${IRS_MILEAGE_RATE.toFixed(3).replace(/0$/, "")}/mile</p></div>
       </div>
 
       <div className="bg-white border border-gray-100 rounded-2xl p-4 mb-3 space-y-3">
@@ -999,7 +999,7 @@ function TripEditForm({ form, onChange, onSave, onDiscard, onDelete, onDestInput
   const odoStart = parseInt(form.odoStart)
   const odoEnd = parseInt(form.odoEnd)
   const miles = odoEnd - odoStart
-  const ded = isNaN(miles) || miles <= 0 ? 0 : miles * IRS_MILEAGE_RATE
+  const ded = isNaN(miles) || miles <= 0 || !form.date ? 0 : calcMileageDeductible(miles, form.date)
 
   return (
     <div className="bg-white border-2 border-emerald-400 rounded-2xl p-4">

@@ -1,4 +1,24 @@
-export const IRS_MILEAGE_RATE = 0.70 // 2025 rate per mile
+// IRS business standard mileage rate, as dated periods (oldest first). The IRS usually sets one
+// rate per year in December, but occasionally changes it mid-year when fuel spikes (2011, 2022,
+// 2026), so look the rate up by the trip's date, not just its year. Add each new period here.
+const IRS_MILEAGE_RATE_PERIODS: { from: string; rate: number }[] = [
+  { from: "2023-01-01", rate: 0.655 },
+  { from: "2024-01-01", rate: 0.67 },
+  { from: "2025-01-01", rate: 0.70 },
+  { from: "2026-01-01", rate: 0.725 }, // IRS Notice 2026-10
+  { from: "2026-07-01", rate: 0.76 }, // IRS Announcement 2026-11 (midyear increase)
+]
+
+// Trip dates are stored as UTC midnight, so compare on the UTC calendar day.
+export function mileageRateOn(date: Date | string): number {
+  const day = typeof date === "string" ? date.slice(0, 10) : date.toISOString().slice(0, 10)
+  let rate = IRS_MILEAGE_RATE_PERIODS[0].rate
+  for (const p of IRS_MILEAGE_RATE_PERIODS) if (day >= p.from) rate = p.rate
+  return rate
+}
+
+// The rate in effect today. Use mileageRateOn(trip.date) for anything tied to a specific trip.
+export const IRS_MILEAGE_RATE = mileageRateOn(new Date())
 
 export const DEDUCT_RATES: Record<string, number> = {
   Travel: 1.0,
@@ -69,8 +89,8 @@ export function calcDeductible(
   return amount * (DEDUCT_RATES[category] ?? 0.5)
 }
 
-export function calcMileageDeductible(miles: number): number {
-  return miles * IRS_MILEAGE_RATE
+export function calcMileageDeductible(miles: number, date: Date | string): number {
+  return Math.round(miles * mileageRateOn(date) * 100) / 100
 }
 
 // IRS required fields per category
