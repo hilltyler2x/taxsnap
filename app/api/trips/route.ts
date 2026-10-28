@@ -21,8 +21,12 @@ export async function GET(req: NextRequest) {
     where: { userId, date: { gte: new Date(`${year}-01-01`), lte: new Date(`${year}-12-31`) } },
     orderBy: { date: "desc" },
   })
+  // Recompute from the rate in effect on each trip's date rather than trusting the stored value,
+  // so trips saved before a rate change (e.g. the July 2026 midyear increase) still total correctly.
+  const withRates = trips.map(t => ({ ...t, deductible: calcMileageDeductible(t.miles, t.date) }))
   const totalMiles = trips.reduce((s, t) => s + t.miles, 0)
-  return NextResponse.json({ trips, totalMiles, totalDeductible: calcMileageDeductible(totalMiles) })
+  const totalDeductible = withRates.reduce((s, t) => s + t.deductible, 0)
+  return NextResponse.json({ trips: withRates, totalMiles, totalDeductible })
 }
 
 export async function POST(req: NextRequest) {
@@ -40,7 +44,7 @@ export async function POST(req: NextRequest) {
 
   const miles = data.odoEnd - data.odoStart
   const trip = await prisma.trip.create({
-    data: { userId, purpose: data.purpose, destination: data.destination, odoStart: data.odoStart, odoEnd: data.odoEnd, miles, date: new Date(data.date), deductible: calcMileageDeductible(miles) },
+    data: { userId, purpose: data.purpose, destination: data.destination, odoStart: data.odoStart, odoEnd: data.odoEnd, miles, date: new Date(data.date), deductible: calcMileageDeductible(miles, data.date) },
   })
   return NextResponse.json({ trip })
 }

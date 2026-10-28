@@ -35,7 +35,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       odoEnd: data.odoEnd,
       miles,
       date: new Date(data.date),
-      deductible: calcMileageDeductible(miles),
+      deductible: calcMileageDeductible(miles, data.date),
     },
   })
   return NextResponse.json({ trip })
