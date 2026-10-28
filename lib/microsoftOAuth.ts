@@ -1,4 +1,5 @@
 import { stripHtml, EMAIL_BODY_MAX_CHARS } from "@/lib/emailText"
+import { isPdfPart, PDF_MAX_BYTES, PDF_MAX_PER_EMAIL, type PdfAttachment } from "@/lib/pdfAttachments"
 
 const TENANT = process.env.AZURE_AD_TENANT_ID ?? "common"
 const AUTHORITY = `https://login.microsoftonline.com/${TENANT}`
@@ -55,7 +56,7 @@ export async function refreshMicrosoftToken(refreshToken: string): Promise<MsTok
   return res.json()
 }
 
-export type EmailCandidate = { id: string; from: string; subject: string; date: string; snippet: string }
+export type EmailCandidate = { id: string; from: string; subject: string; date: string; snippet: string; loadPdfs?: () => Promise<PdfAttachment[]> }
 
 export async function listOutlookReceiptCandidates(accessToken: string): Promise<EmailCandidate[]> {
   const params = new URLSearchParams({
@@ -63,7 +64,7 @@ export async function listOutlookReceiptCandidates(accessToken: string): Promise
     "$top": "10",
     // bodyPreview alone is too short to contain the actual charged amount for
     // most receipt emails — fetch the full body too so extraction can find it.
-    "$select": "id,from,subject,receivedDateTime,bodyPreview,body",
+    "$select": "id,from,subject,receivedDateTime,bodyPreview,body,hasAttachments",
   })
   const res = await fetch(`https://graph.microsoft.com/v1.0/me/messages?${params.toString()}`, {
     headers: { Authorization: `Bearer ${accessToken}`, ConsistencyLevel: "eventual" },
@@ -79,6 +80,19 @@ export async function listOutlookReceiptCandidates(accessToken: string): Promise
       subject: m.subject ?? "",
       date: m.receivedDateTime ?? "",
       snippet: (bodyText || m.bodyPreview || "").slice(0, EMAIL_BODY_MAX_CHARS),
+      loadPdfs: m.hasAttachments ? () => loadOutlookPdfs(accessToken, m.id) : undefined,
     }
   })
+}
+
+async function loadOutlookPdfs(accessToken: string, messageId: string): Promise<PdfAttachment[]> {
+  const res = await fetch(`https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(messageId)}/attachments`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if (!res.ok) throw new Error(`Graph attachments failed: ${res.status} ${await res.text()}`)
+  const data = await res.json()
+  return (data.value ?? [])
+    .filter((a: any) => a["@odata.type"] === "#microsoft.graph.fileAttachment" && isPdfPart(a.contentType, a.name) && a.contentBytes && (a.size ?? 0) <= PDF_MAX_BYTES)
+    .slice(0, PDF_MAX_PER_EMAIL)
+    .map((a: any) => ({ filename: a.name ?? "attachment.pdf", base64: a.contentBytes }))
 }
