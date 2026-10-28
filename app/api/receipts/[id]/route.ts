@@ -18,11 +18,12 @@ const ReceiptUpdateSchema = z.object({
   auditNote: z.string().nullable().optional(),
 })
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const existing = await prisma.receipt.findUnique({ where: { id: params.id } })
+  const existing = await prisma.receipt.findUnique({ where: { id } })
   if (!existing || existing.userId !== user.id) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
   const body = await req.json()
@@ -31,7 +32,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
   const data = parsed.data
   const receipt = await prisma.receipt.update({
-    where: { id: params.id },
+    where: { id },
     data: {
       name: data.name,
       amount: data.amount,
@@ -50,13 +51,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   return NextResponse.json({ receipt })
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const existing = await prisma.receipt.findUnique({ where: { id: params.id } })
+  const existing = await prisma.receipt.findUnique({ where: { id } })
   if (!existing || existing.userId !== user.id) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
-  await prisma.receipt.delete({ where: { id: params.id } })
+  await prisma.receipt.delete({ where: { id } })
   return NextResponse.json({ ok: true })
 }
