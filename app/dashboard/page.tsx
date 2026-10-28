@@ -657,7 +657,7 @@ export default function Dashboard() {
 
         {/* TAXES */}
         {tab === "taxes" && (
-          <TaxesTab receipts={receipts} trips={trips} isPro={isPro} onUpgrade={() => setTab("account")} />
+          <TaxesTab receipts={receipts} trips={trips} isPro={isPro} onUpgrade={() => setTab("account")} onAuditChecked={fetchReceipts} />
         )}
 
         {/* ACCOUNT */}
@@ -1045,7 +1045,35 @@ function TripEditForm({ form, onChange, onSave, onDiscard, onDelete, onDestInput
   )
 }
 
-function TaxesTab({ receipts, trips, isPro, onUpgrade }: any) {
+function TaxesTab({ receipts, trips, isPro, onUpgrade, onAuditChecked }: any) {
+  const [auditChecking, setAuditChecking] = useState(false)
+  const flaggedCount = receipts.filter((r: any) => r.auditFlag).length
+  // auditNote null = never reviewed (receipts from before audit flags existed, or added by hand).
+  const uncheckedCount = receipts.filter((r: any) => !r.auditFlag && r.auditNote == null).length
+
+  const runAuditCheck = async () => {
+    setAuditChecking(true)
+    let checked = 0, flagged = 0
+    try {
+      // The API reviews up to 150 per call; keep going until none are left (or it stops progressing).
+      for (let i = 0; i < 20; i++) {
+        const res = await fetch("/api/receipts/audit-check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ year: new Date().getFullYear() }),
+        })
+        if (!res.ok) { const e = await res.json().catch(() => ({})); toast.error(errMsg(e, "Audit check failed")); break }
+        const d = await res.json()
+        checked += d.checked; flagged += d.flagged
+        if (!d.remaining || !d.checked) break
+      }
+      if (checked) toast(flagged ? `Checked ${checked} receipts — ${flagged} flagged for weak audit protection` : `Checked ${checked} receipts — none flagged`, { icon: flagged ? "⚠️" : "✅", duration: 5000 })
+      onAuditChecked?.()
+    } finally {
+      setAuditChecking(false)
+    }
+  }
+
   const bycat: Record<string, number> = {}
   receipts.forEach((r: any) => { bycat[r.category] = (bycat[r.category] ?? 0) + (r.deductible ?? 0) })
   const milesDed = trips.reduce((s: number, t: any) => s + (t.deductible ?? 0), 0)
@@ -1162,6 +1190,22 @@ function TaxesTab({ receipts, trips, isPro, onUpgrade }: any) {
           </div>
         ))}
         {!Object.keys(bycat).length && <p className="text-xs text-gray-400 text-center py-6">Add receipts to see your breakdown</p>}
+      </div>
+      <div className="bg-white border border-gray-100 rounded-2xl p-4 mb-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium">Audit check</p>
+            <p className="text-xs text-gray-500">
+              {flaggedCount ? `${flaggedCount} receipt${flaggedCount === 1 ? "" : "s"} flagged ⚠` : "No receipts flagged"}
+              {uncheckedCount ? ` · ${uncheckedCount} not yet reviewed` : ""}
+            </p>
+          </div>
+          {uncheckedCount > 0 && (
+            <button onClick={runAuditCheck} disabled={auditChecking} className="flex-shrink-0 text-xs font-medium px-3 py-2 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 disabled:opacity-60">
+              {auditChecking ? "Checking…" : "Review now"}
+            </button>
+          )}
+        </div>
       </div>
       {isPro ? (
         <div className="space-y-2">
