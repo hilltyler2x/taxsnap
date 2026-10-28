@@ -2,7 +2,7 @@
 import { useUser, useClerk } from "@clerk/nextjs"
 import { useEffect, useState, useRef } from "react"
 import toast from "react-hot-toast"
-import { calcDeductible, IRS_MILEAGE_RATE, mileageRateFor, CATEGORIES, BUSINESS_PURPOSES } from "@/lib/irs"
+import { calcDeductible, IRS_MILEAGE_RATE, mileageRateOn, CATEGORIES, BUSINESS_PURPOSES } from "@/lib/irs"
 import { usePlatform, takeReceiptPhoto, hapticSuccess, saveOrShareFile, openInSystemBrowser, openSignedLink } from "@/lib/native"
 import { noteAppOpen, reviewMoment, reviewAvailable, openStoreReview } from "@/lib/review"
 import { tripTracker, tripMiles, localDay, placeName, type TrackerState } from "@/lib/tripTracker"
@@ -832,7 +832,7 @@ export default function Dashboard() {
             <p className="text-3xl mb-2">🚗</p>
             <p className="font-medium mb-2">Log business miles automatically?</p>
             <p className="text-sm text-gray-600 leading-relaxed mb-2">
-              Every business mile is worth ${mileageRateFor(new Date().getFullYear())} off your taxes. TaxSnap can notice when you drive and save each drive for you to review. You mark it business, like a meetup or an inventory run, or delete it as personal.
+              Every business mile is worth ${IRS_MILEAGE_RATE} off your taxes. TaxSnap can notice when you drive and save each drive for you to review. You mark it business, like a meetup or an inventory run, or delete it as personal.
             </p>
             <p className="text-sm text-gray-600 leading-relaxed mb-4">
               {isIOS
@@ -1091,7 +1091,7 @@ function LockScreen({ icon, title, sub, onUpgrade }: any) {
 // Miles for a trip: typed in, or odometer start and end. Shared by the new-trip and edit forms.
 function MilesFields({ form, onChange }: any) {
   const miles = formMiles(form)
-  const rate = mileageRateFor(parseInt(form.date) || new Date().getFullYear())
+  const rate = mileageRateOn(form.date || todayLocalISO())
   return (
     <div className="space-y-2">
       <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5 text-xs">
