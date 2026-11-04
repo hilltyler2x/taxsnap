@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getCurrentUser } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
-import { IRS_MILEAGE_RATE } from "@/lib/irs"
+import { calcMileageDeductible } from "@/lib/irs"
 
 export async function GET(req: NextRequest) {
   const user = await getCurrentUser()
@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
     const att = Array.isArray(r.attendees) ? (r.attendees as any[]).map((a:any) => `${a.name} (${a.relationship})`).join("; ") : ""
     rows.push(["Receipt", r.date.toISOString().split("T")[0], r.name, r.place ?? "", r.purpose ?? "", r.category, r.amount.toFixed(2), (r.deductible ?? 0).toFixed(2), r.notes ?? "", att, "", "", r.auditFlag ? "Yes" : "No", r.auditNote ?? ""])
   })
-  trips.forEach(t => rows.push(["Mileage", t.date.toISOString().split("T")[0], "", t.destination, t.purpose, "Travel", (t.miles * IRS_MILEAGE_RATE).toFixed(2), t.deductible.toFixed(2), "", "", t.odoStart.toString(), t.odoEnd.toString(), "No", ""]))
+  trips.forEach(t => rows.push(["Mileage", t.date.toISOString().split("T")[0], "", t.destination, t.purpose, "Travel", calcMileageDeductible(t.miles, t.date).toFixed(2), calcMileageDeductible(t.miles, t.date).toFixed(2), "", "", t.odoStart.toString(), t.odoEnd.toString(), "No", ""]))
 
   const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n")
   return new NextResponse(csv, { headers: { "Content-Type": "text/csv", "Content-Disposition": `attachment; filename="taxsnap_${year}.csv"` } })
