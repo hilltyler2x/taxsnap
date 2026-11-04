@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getCurrentUser } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
-import { mileageRateFor } from "@/lib/irs"
+import { mileageRateOn } from "@/lib/irs"
 
 export async function GET(req: NextRequest) {
   const user = await getCurrentUser()
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
   })
   const howMeasured: Record<string, string> = { odometer: "Odometer", manual: "Entered by hand", gps: "GPS trip", auto: "GPS trip (automatic)" }
   trips.forEach(t => {
-    const notes = [`${t.miles} mi @ $${mileageRateFor(t.date.getUTCFullYear())}/mi`, howMeasured[t.source] ?? t.source, t.startPlace ? `From ${t.startPlace}` : ""].filter(Boolean).join(" · ")
+    const notes = [`${t.miles} mi @ $${mileageRateOn(t.date)}/mi`, howMeasured[t.source] ?? t.source, t.startPlace ? `From ${t.startPlace}` : ""].filter(Boolean).join(" · ")
     rows.push(["Mileage", t.date.toISOString().split("T")[0], "", t.destination, t.purpose, "Travel", t.deductible.toFixed(2), t.deductible.toFixed(2), notes, "", t.odoStart?.toString() ?? "", t.odoEnd?.toString() ?? "", "No", ""])
   })
 

@@ -1,18 +1,24 @@
-// IRS business standard mileage rate per mile, by tax year. Add next year's rate when the
-// IRS announces it (usually mid-December). Years without an entry use the latest rate.
-export const IRS_MILEAGE_RATES: Record<number, number> = {
-  2024: 0.67,
-  2025: 0.70,
-  2026: 0.725,
+// IRS business standard mileage rate, as dated periods (oldest first). The IRS usually sets one
+// rate per year in December, but occasionally changes it mid-year when fuel spikes (2011, 2022,
+// 2026), so look the rate up by the trip's date, not just its year. Add each new period here.
+const IRS_MILEAGE_RATE_PERIODS: { from: string; rate: number }[] = [
+  { from: "2023-01-01", rate: 0.655 },
+  { from: "2024-01-01", rate: 0.67 },
+  { from: "2025-01-01", rate: 0.70 },
+  { from: "2026-01-01", rate: 0.725 }, // IRS Notice 2026-10
+  { from: "2026-07-01", rate: 0.76 }, // IRS Announcement 2026-11 (midyear increase)
+]
+
+// Trip dates are stored as UTC midnight, so compare on the UTC calendar day.
+export function mileageRateOn(date: Date | string): number {
+  const day = typeof date === "string" ? date.slice(0, 10) : date.toISOString().slice(0, 10)
+  let rate = IRS_MILEAGE_RATE_PERIODS[0].rate
+  for (const p of IRS_MILEAGE_RATE_PERIODS) if (day >= p.from) rate = p.rate
+  return rate
 }
 
-const LATEST_RATE_YEAR = Math.max(...Object.keys(IRS_MILEAGE_RATES).map(Number))
-
-export function mileageRateFor(year: number): number {
-  return IRS_MILEAGE_RATES[year] ?? IRS_MILEAGE_RATES[LATEST_RATE_YEAR]
-}
-
-export const IRS_MILEAGE_RATE = mileageRateFor(new Date().getFullYear())
+// The rate in effect today. Use mileageRateOn(trip.date) for anything tied to a specific trip.
+export const IRS_MILEAGE_RATE = mileageRateOn(new Date())
 
 export const DEDUCT_RATES: Record<string, number> = {
   Travel: 1.0,
@@ -83,10 +89,8 @@ export function calcDeductible(
   return amount * (DEDUCT_RATES[category] ?? 0.5)
 }
 
-// date is the trip date, so a trip keeps the rate of the year it was driven.
-export function calcMileageDeductible(miles: number, date?: Date): number {
-  const year = date ? date.getUTCFullYear() : new Date().getFullYear()
-  return Math.round(miles * mileageRateFor(year) * 100) / 100
+export function calcMileageDeductible(miles: number, date: Date | string): number {
+  return Math.round(miles * mileageRateOn(date) * 100) / 100
 }
 
 // IRS required fields per category
