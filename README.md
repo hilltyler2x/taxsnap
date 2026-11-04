@@ -171,6 +171,6 @@ native changes (plugins, icons, `Info.plist`, `AndroidManifest.xml`) need a new 
 - The iPhone app hides prices and upgrade buttons (App Store rule 3.1.1). Pro bought on the website still applies.
 - `.github/workflows/build.yml` builds both apps on every pull request. On merge to main it publishes
   `TaxSnap-test.apk` and `TaxSnap-unsigned.ipa` on the `test-build` release and uploads to TestFlight when the
-  `APPLE_TEAM_ID`, `ASC_KEY_ID`, `ASC_ISSUER_ID` and `ASC_KEY_P8` secrets are set.
+  `ASC_KEY_ID`, `ASC_ISSUER_ID` and `ASC_KEY_P8` secrets are set (Apple Team ID `92DQYZ2VNV` is in the Xcode project).
 - After adding or upgrading a Capacitor plugin, run `npx cap sync` and commit the `ios/` and `android/` changes.
 - Icons and splash come from `assets/` via `npx capacitor-assets generate`.
