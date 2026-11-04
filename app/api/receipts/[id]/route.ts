@@ -31,6 +31,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
 
   const data = parsed.data
+  // Same rule as create: an edit that turns this receipt into an exact copy of another one
+  // (same name case-insensitive + date + amount) would double-count the deduction.
+  const dupe = await prisma.receipt.findFirst({
+    where: {
+      userId: user.id,
+      id: { not: id },
+      amount: data.amount,
+      date: new Date(data.date),
+      name: { equals: data.name.trim(), mode: "insensitive" },
+    },
+  })
+  if (dupe) {
+    return NextResponse.json({ error: "Duplicate receipt — another entry with the same name, date, and amount already exists." }, { status: 409 })
+  }
+
   const receipt = await prisma.receipt.update({
     where: { id },
     data: {
