@@ -5,6 +5,7 @@ import { listGmailReceiptCandidates } from "@/lib/googleOAuth"
 import { listOutlookReceiptCandidates, refreshMicrosoftToken } from "@/lib/microsoftOAuth"
 import { BUSINESS_PURPOSES } from "@/lib/irs"
 import { applyLearnedClassificationBatch } from "@/lib/learnedCategory"
+import { extractAmountFromPdfs, PDF_MAX_EMAILS_PER_REQUEST, type PdfAttachment } from "@/lib/pdfAttachments"
 import Anthropic from "@anthropic-ai/sdk"
 
 const client = new Anthropic()
@@ -13,11 +14,11 @@ const client = new Anthropic()
 // the 10s Vercel default has been observed to cut this off mid-request.
 export const maxDuration = 60
 
-type Candidate = { id: string; from: string; subject: string; date: string; snippet: string; provider: "google" | "azure-ad" }
+type Candidate = { id: string; from: string; subject: string; date: string; snippet: string; provider: "google" | "azure-ad"; loadPdfs?: () => Promise<PdfAttachment[]> }
 
 async function extractReceipts(userId: string, items: Candidate[]) {
   if (!items.length) return []
-  const listText = items.map((it, i) => `${i}. From: ${it.from}\nSubject: ${it.subject}\nDate: ${it.date}\nPreview: ${it.snippet}`).join("\n\n")
+  const listText = items.map((it, i) => `${i}. From: ${it.from}\nSubject: ${it.subject}\nDate: ${it.date}${it.loadPdfs ? "\nHas attachments: yes (amount may be in the attachment; use 0 if not in the text)" : ""}\nPreview: ${it.snippet}`).join("\n\n")
 
   let text = ""
   try {
@@ -58,11 +59,37 @@ async function extractReceipts(userId: string, items: Candidate[]) {
           ...(source.provider === "google" ? { gmailId: source.id } : { outlookId: source.id }),
         }
       })
+    await fillAmountsFromPdfs(results, parsed.map(p => items[p.index]).filter(Boolean))
     return applyLearnedClassificationBatch(userId, results.map(r => ({ ...r, name: r.from })))
   } catch (err) {
     console.error("Could not parse email extraction response:", text)
     return []
   }
+}
+
+// When the body had no amount (e.g. EasyPost: "your receipt is attached"), read the PDF.
+// Results and sources are index-aligned. Mutates results in place.
+async function fillAmountsFromPdfs(
+  results: { amount: number; auditFlag: boolean; auditNote: string }[],
+  sources: Candidate[]
+) {
+  const todo = results
+    .map((r, i) => ({ r, src: sources[i] }))
+    .filter(({ r, src }) => !(r.amount > 0) && src?.loadPdfs)
+    .slice(0, PDF_MAX_EMAILS_PER_REQUEST)
+  await Promise.all(todo.map(async ({ r, src }) => {
+    try {
+      const pdfs = await src.loadPdfs!()
+      const found = await extractAmountFromPdfs(pdfs, { from: src.from, subject: src.subject })
+      if (!found) return
+      r.amount = found.amount
+      // The body-only flag was usually about the missing amount; the PDF verdict is better informed.
+      r.auditFlag = found.auditFlag
+      r.auditNote = found.auditNote
+    } catch (err) {
+      console.error("Failed to read PDF attachment:", err)
+    }
+  }))
 }
 
 export async function GET(req: NextRequest) {
