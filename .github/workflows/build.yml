@@ -69,6 +69,40 @@ jobs:
             --notes "Latest test builds from main. Android: download TaxSnap-test.apk on your phone and install it."
           gh release upload test-build TaxSnap-test.apk --clobber
 
+      # Google Play: a release bundle signed with the upload key, once its secrets exist.
+      - name: Check Google Play upload key
+        id: play
+        env:
+          ANDROID_UPLOAD_KEYSTORE_B64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_B64 }}
+          ANDROID_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+        run: |
+          if [ -n "$ANDROID_UPLOAD_KEYSTORE_B64" ] && [ -n "$ANDROID_UPLOAD_KEY_PASSWORD" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Google Play bundle skipped::Add ANDROID_UPLOAD_KEYSTORE_B64 and ANDROID_UPLOAD_KEY_PASSWORD in Settings → Secrets and variables → Actions to build the Play Store bundle."
+          fi
+
+      - name: Build Google Play bundle (AAB)
+        if: steps.play.outputs.ready == 'true' && env.PUBLISH == 'true'
+        working-directory: android
+        env:
+          ANDROID_UPLOAD_KEYSTORE_B64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_B64 }}
+          TAXSNAP_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+          TAXSNAP_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+          TAXSNAP_UPLOAD_KEY_ALIAS: upload
+        run: |
+          printf '%s' "$ANDROID_UPLOAD_KEYSTORE_B64" | tr -d '\r\n ' | base64 -d > app/upload.keystore
+          ./gradlew bundleRelease -PversionCode=${{ github.run_number }}
+          rm -f app/upload.keystore
+          cp app/build/outputs/bundle/release/app-release.aab "$GITHUB_WORKSPACE/TaxSnap-play.aab"
+
+      - name: Publish the Play bundle to the test-build release
+        if: steps.play.outputs.ready == 'true' && env.PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload test-build TaxSnap-play.aab --clobber
+
   ios:
     runs-on: macos-26
     # Waits for the Android job so only one job creates the test-build release.
