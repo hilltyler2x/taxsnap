@@ -1,8 +1,11 @@
 "use client"
 import { useRouter } from "next/navigation"
+import { usePlatform } from "@/lib/native"
 
 export default function LandingPage() {
   const router = useRouter()
+  // The iPhone app can't advertise purchases made outside the App Store.
+  const showPricing = usePlatform() !== "ios"
 
   return (
     <div style={{ minHeight: "100vh", background: "#f9fafb", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px", fontFamily: "sans-serif" }}>
@@ -14,15 +17,17 @@ export default function LandingPage() {
         </div>
 
         <div style={{ background: "#fff", borderRadius: "16px", padding: "24px", border: "1px solid #eee", marginBottom: "12px" }}>
-          <div style={{ background: "#E1F5EE", borderRadius: "10px", padding: "12px 14px", marginBottom: "16px" }}>
-            <p style={{ fontSize: "13px", color: "#0F6E56", fontWeight: "500", margin: "0 0 2px" }}>✦ 7-day free trial</p>
-            <p style={{ fontSize: "12px", color: "#0F6E56", margin: 0 }}>Full access · Cancel anytime · Card required</p>
-          </div>
+          {showPricing && (
+            <div style={{ background: "#E1F5EE", borderRadius: "10px", padding: "12px 14px", marginBottom: "16px" }}>
+              <p style={{ fontSize: "13px", color: "#0F6E56", fontWeight: "500", margin: "0 0 2px" }}>✦ 7-day free trial</p>
+              <p style={{ fontSize: "12px", color: "#0F6E56", margin: 0 }}>Full access · Cancel anytime · Card required</p>
+            </div>
+          )}
           <button
             onClick={() => router.push("/login")}
             style={{ width: "100%", padding: "13px", background: "#1D9E75", color: "#fff", border: "none", borderRadius: "10px", fontSize: "15px", fontWeight: "500", cursor: "pointer", marginBottom: "8px" }}
           >
-            Start free trial
+            {showPricing ? "Start free trial" : "Get started"}
           </button>
         </div>
 
@@ -33,8 +38,13 @@ export default function LandingPage() {
           Explore without signing in →
         </button>
 
-        <p style={{ textAlign: "center", fontSize: "11px", color: "#aaa", marginTop: "16px" }}>
-          After trial, Pro is $5/month. Cancel anytime before 7 days and pay nothing.
+        {showPricing && (
+          <p style={{ textAlign: "center", fontSize: "11px", color: "#aaa", marginTop: "16px" }}>
+            After trial, Pro is $5/month. Cancel anytime before 7 days and pay nothing.
+          </p>
+        )}
+        <p style={{ textAlign: "center", fontSize: "11px", marginTop: "12px" }}>
+          <a href="/privacy" style={{ color: "#aaa" }}>Privacy policy</a>
         </p>
       </div>
     </div>

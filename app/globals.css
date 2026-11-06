@@ -17,3 +17,22 @@ input, select, textarea {
 input:focus, select:focus, textarea:focus {
   @apply ring-1 ring-emerald-400;
 }
+
+body {
+  background: #f9fafb;
+}
+
+/* Notch / home-bar padding for the phone app (zero in a normal browser). */
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Bottom-sheet modals keep clear of the notch and home bar. */
+.modal-safe {
+  padding-top: max(0.75rem, env(safe-area-inset-top, 0px));
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+}

@@ -1,32 +1,27 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getCurrentUser } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
+import { TripInputSchema, tripData } from "@/lib/tripInput"
 import { calcMileageDeductible } from "@/lib/irs"
-import { z } from "zod"
-
-const TripSchema = z.object({
-  purpose: z.string().min(1),
-  destination: z.string().min(1),
-  odoStart: z.number().int().positive(),
-  odoEnd: z.number().int().positive(),
-  date: z.string(),
-})
 
 export async function GET(req: NextRequest) {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   const userId = user.id
   const year = new URL(req.url).searchParams.get("year") ?? new Date().getFullYear().toString()
-  const trips = await prisma.trip.findMany({
+  const all = await prisma.trip.findMany({
     where: { userId, date: { gte: new Date(`${year}-01-01`), lte: new Date(`${year}-12-31`) } },
     orderBy: { date: "desc" },
   })
-  // Recompute from the rate in effect on each trip's date rather than trusting the stored value,
+  // Auto-detected drives aren't business trips until the user says so. Deductions are
+  // recomputed from the rate in effect on each trip's date rather than trusting the stored value,
   // so trips saved before a rate change (e.g. the July 2026 midyear increase) still total correctly.
-  const withRates = trips.map(t => ({ ...t, deductible: calcMileageDeductible(t.miles, t.date) }))
+  const withRates = all.map(t => ({ ...t, deductible: calcMileageDeductible(t.miles, t.date) }))
+  const trips = withRates.filter(t => !t.needsReview)
+  const toReview = withRates.filter(t => t.needsReview)
   const totalMiles = trips.reduce((s, t) => s + t.miles, 0)
-  const totalDeductible = withRates.reduce((s, t) => s + t.deductible, 0)
-  return NextResponse.json({ trips: withRates, totalMiles, totalDeductible })
+  const totalDeductible = trips.reduce((s, t) => s + t.deductible, 0)
+  return NextResponse.json({ trips, toReview, totalMiles, totalDeductible })
 }
 
 export async function POST(req: NextRequest) {
@@ -37,14 +32,11 @@ export async function POST(req: NextRequest) {
   if (plan === "FREE") return NextResponse.json({ error: "Mileage tracking requires Pro. Upgrade for $5/month." }, { status: 403 })
 
   const body = await req.json()
-  const parsed = TripSchema.safeParse(body)
+  const parsed = TripInputSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
-  const data = parsed.data
-  if (data.odoEnd <= data.odoStart) return NextResponse.json({ error: "Odometer end must be greater than start" }, { status: 400 })
+  const result = tripData(parsed.data)
+  if ("error" in result) return NextResponse.json({ error: result.error }, { status: 400 })
 
-  const miles = data.odoEnd - data.odoStart
-  const trip = await prisma.trip.create({
-    data: { userId, purpose: data.purpose, destination: data.destination, odoStart: data.odoStart, odoEnd: data.odoEnd, miles, date: new Date(data.date), deductible: calcMileageDeductible(miles, data.date) },
-  })
+  const trip = await prisma.trip.create({ data: { userId, ...result.data } })
   return NextResponse.json({ trip })
 }

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">TaxSnap</string>
+    <string name="title_activity_main">TaxSnap</string>
+    <string name="package_name">com.hilltyler.taxsnap</string>
+    <string name="custom_url_scheme">com.hilltyler.taxsnap</string>
+</resources>
