@@ -3,10 +3,12 @@ import { Inter } from "next/font/google"
 import "./globals.css"
 import { ClerkProvider } from "@clerk/nextjs"
 import { Toaster } from "react-hot-toast"
+import { SITE_URL } from "@/lib/site"
 
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: "TaxSnap — IRS-ready receipt tracker",
   description: "Scan receipts, track mileage, and auto-fill your taxes.",
 }

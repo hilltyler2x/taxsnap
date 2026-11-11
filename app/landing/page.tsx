@@ -1,9 +1,7 @@
 "use client"
-import { useRouter } from "next/navigation"
+import Link from "next/link"
 
 export default function LandingPage() {
-  const router = useRouter()
-
   return (
     <div style={{ minHeight: "100vh", background: "#f9fafb", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px", fontFamily: "sans-serif" }}>
       <div style={{ maxWidth: "400px", width: "100%" }}>
@@ -18,20 +16,20 @@ export default function LandingPage() {
             <p style={{ fontSize: "13px", color: "#0F6E56", fontWeight: "500", margin: "0 0 2px" }}>✦ 7-day free trial</p>
             <p style={{ fontSize: "12px", color: "#0F6E56", margin: 0 }}>Full access · Cancel anytime · Card required</p>
           </div>
-          <button
-            onClick={() => router.push("/login")}
-            style={{ width: "100%", padding: "13px", background: "#1D9E75", color: "#fff", border: "none", borderRadius: "10px", fontSize: "15px", fontWeight: "500", cursor: "pointer", marginBottom: "8px" }}
+          <Link
+            href="/login"
+            style={{ display: "block", boxSizing: "border-box", textAlign: "center", textDecoration: "none", width: "100%", padding: "13px", background: "#1D9E75", color: "#fff", border: "none", borderRadius: "10px", fontSize: "15px", fontWeight: "500", cursor: "pointer", marginBottom: "8px" }}
           >
             Start free trial
-          </button>
+          </Link>
         </div>
 
-        <button
-          onClick={() => router.push("/explore")}
-          style={{ width: "100%", padding: "13px", background: "transparent", color: "#666", border: "1px solid #ddd", borderRadius: "10px", fontSize: "14px", cursor: "pointer" }}
+        <Link
+          href="/explore"
+          style={{ display: "block", boxSizing: "border-box", textAlign: "center", textDecoration: "none", width: "100%", padding: "13px", background: "transparent", color: "#666", border: "1px solid #ddd", borderRadius: "10px", fontSize: "14px", cursor: "pointer" }}
         >
           Explore without signing in →
-        </button>
+        </Link>
 
         <p style={{ textAlign: "center", fontSize: "11px", color: "#aaa", marginTop: "16px" }}>
           After trial, Pro is $5/month. Cancel anytime before 7 days and pay nothing.
