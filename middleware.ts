@@ -1,6 +1,10 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server"
 
-const isPublicRoute = createRouteMatcher(["/landing(.*)", "/explore(.*)", "/login(.*)", "/"])
+const isPublicRoute = createRouteMatcher([
+  "/landing(.*)", "/explore(.*)", "/login(.*)", "/",
+  // Public marketing pages and crawler files; must stay reachable without signing in.
+  "/guides(.*)", "/robots.txt", "/sitemap.xml", "/llms.txt",
+])
 const isApiRoute = createRouteMatcher(["/api(.*)"])
 
 export default clerkMiddleware(async (auth, request) => {

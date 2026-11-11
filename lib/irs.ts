@@ -1,7 +1,7 @@
 // IRS business standard mileage rate, as dated periods (oldest first). The IRS usually sets one
 // rate per year in December, but occasionally changes it mid-year when fuel spikes (2011, 2022,
 // 2026), so look the rate up by the trip's date, not just its year. Add each new period here.
-const IRS_MILEAGE_RATE_PERIODS: { from: string; rate: number }[] = [
+export const IRS_MILEAGE_RATE_PERIODS: { from: string; rate: number }[] = [
   { from: "2023-01-01", rate: 0.655 },
   { from: "2024-01-01", rate: 0.67 },
   { from: "2025-01-01", rate: 0.70 },
